@@ -2,7 +2,6 @@ import streamlit as st
 import pdfplumber
 import re
 import pandas as pd
-from openpyxl import Workbook
 from pathlib import Path
 import zipfile
 import tempfile
@@ -15,6 +14,14 @@ def clean(x):
     if x is None:
         return ""
     return re.sub(r"\s+", " ", str(x).replace("\n"," ")).strip()
+
+def corrigir_texto(texto):
+    if texto is None:
+        return ""
+    try:
+        return texto.encode('latin1').decode('utf-8')
+    except:
+        return texto
 
 def is_item(row):
     if not row or len(row) < 6:
@@ -33,6 +40,8 @@ def escape_xml(texto):
     texto = texto.replace("&", "&amp;")
     texto = texto.replace("<", "&lt;")
     texto = texto.replace(">", "&gt;")
+    texto = texto.replace('"', "&quot;")
+    texto = texto.replace("'", "&apos;")
     return texto
 
 if uploaded_file:
@@ -51,9 +60,9 @@ if uploaded_file:
                             continue
 
                         ordem = int(clean(row[1]))
-                        marca = clean(row[2])
-                        modelo = clean(row[3])
-                        descricao = clean(row[4])
+                        marca = corrigir_texto(clean(row[2]))
+                        modelo = corrigir_texto(clean(row[3]))
+                        descricao = corrigir_texto(clean(row[4]))
                         codigo = clean(row[5]).replace(" ", "")
 
                         key = (ordem, modelo)
@@ -67,6 +76,12 @@ if uploaded_file:
 
         df = pd.DataFrame(rows, columns=["ORDEM","MARCA","MODELO","DESC","CODIGO"])
 
+        def limitar(nome):
+            nome = clean(nome)
+            if len(nome) <= 200:
+                return nome
+            return nome[:200]
+
         def gerar(df, suf):
             linhas = ['<?xml version="1.0" encoding="ISO-8859-1"?>','<ArrayOfItemSolicitacao>']
             for _, r in df.iterrows():
@@ -74,14 +89,14 @@ if uploaded_file:
                     "<ItemSolicitacao>",
                     f"<Marca>{escape_xml(limpar_iso(r['MARCA']))}</Marca>",
                     f"<Modelo>{escape_xml(limpar_iso(clean(r['MODELO'])+suf))}</Modelo>",
-                    f"<Nome>{escape_xml(limpar_iso(r['DESC']))}</Nome>",
+                    f"<Nome>{escape_xml(limpar_iso(limitar(r['DESC'])))}</Nome>",
                     "<CodigosBarras>",
                     f"<Codigo>{escape_xml(limpar_iso(r['CODIGO']))}</Codigo>",
                     "</CodigosBarras>",
                     "</ItemSolicitacao>"
                 ])
             linhas.append("</ArrayOfItemSolicitacao>")
-            return "\n".join(linhas)
+            return "\\n".join(linhas)
 
         xml1 = gerar(df, ",")
         xml2 = gerar(df, ".")
