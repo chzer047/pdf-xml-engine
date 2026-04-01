@@ -5,6 +5,7 @@ import pandas as pd
 from pathlib import Path
 import zipfile
 import tempfile
+from ftfy import fix_text
 
 st.title("C XML BR Engine - PDF → XML")
 
@@ -18,10 +19,27 @@ def clean(x):
 def corrigir_texto(texto):
     if texto is None:
         return ""
-    try:
-        return texto.encode('latin1').decode('utf-8')
-    except:
-        return texto
+    texto = fix_text(str(texto))
+
+    for _ in range(3):
+        original = texto
+
+        try:
+            texto = texto.encode("latin1").decode("utf-8")
+        except:
+            pass
+
+        try:
+            texto = texto.encode("cp1252").decode("utf-8")
+        except:
+            pass
+
+        texto = fix_text(texto)
+
+        if texto == original:
+            break
+
+    return texto
 
 def is_item(row):
     if not row or len(row) < 6:
@@ -60,10 +78,10 @@ if uploaded_file:
                             continue
 
                         ordem = int(clean(row[1]))
-                        marca = corrigir_texto(clean(row[2]))
-                        modelo = corrigir_texto(clean(row[3]))
-                        descricao = corrigir_texto(clean(row[4]))
-                        codigo = clean(row[5]).replace(" ", "")
+                        marca = clean(corrigir_texto(row[2]))
+                        modelo = clean(corrigir_texto(row[3]))
+                        descricao = clean(corrigir_texto(row[4]))
+                        codigo = clean(corrigir_texto(row[5])).replace(" ", "")
 
                         key = (ordem, modelo)
                         if key in seen:
