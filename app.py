@@ -83,7 +83,11 @@ if uploaded_file:
             return nome[:200]
 
         def gerar(df, suf):
-            linhas = ['<?xml version="1.0" encoding="ISO-8859-1"?>','<ArrayOfItemSolicitacao>']
+            linhas = [
+                '<?xml version="1.0" encoding="ISO-8859-1"?>',
+                '<ArrayOfItemSolicitacao>'
+            ]
+
             for _, r in df.iterrows():
                 linhas.extend([
                     "<ItemSolicitacao>",
@@ -95,8 +99,10 @@ if uploaded_file:
                     "</CodigosBarras>",
                     "</ItemSolicitacao>"
                 ])
+
             linhas.append("</ArrayOfItemSolicitacao>")
-            return "\\n".join(linhas)
+
+            return "\n".join(linhas).strip()
 
         xml1 = gerar(df, ",")
         xml2 = gerar(df, ".")
