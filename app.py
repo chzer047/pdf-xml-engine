@@ -1,5 +1,6 @@
 import streamlit as st
-import fitz  # PyMuPDF
+import pdfplumber
+import fitz
 import re
 import pandas as pd
 from pathlib import Path
@@ -65,21 +66,58 @@ def limitar(nome):
     return nome[:200]
 
 
-def parse_pdf_with_pymupdf(pdf_path: Path):
+def is_item_row_table(row):
+    if not row or len(row) < 6:
+        return False
+    ordem = clean(row[1])
+    return bool(re.fullmatch(r"\d{3}", ordem))
+
+
+def parse_with_pdfplumber_tables(pdf_path: Path):
     rows = []
     seen = set()
 
-    doc = fitz.open(pdf_path)
+    with pdfplumber.open(str(pdf_path)) as pdf:
+        for page in pdf.pages:
+            for table in page.extract_tables() or []:
+                for row in table:
+                    if not is_item_row_table(row):
+                        continue
+
+                    ordem = int(clean(row[1]))
+                    marca = clean(corrigir_texto(row[2]))
+                    modelo = clean(corrigir_texto(row[3]))
+                    descricao = clean(corrigir_texto(row[4]))
+                    codigo = clean(corrigir_texto(row[5])).replace(" ", "").replace("*", "")
+
+                    if not codigo:
+                        continue
+
+                    key = (ordem, marca, modelo, codigo)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+
+                    rows.append([ordem, marca, modelo, descricao, codigo])
+
+    rows.sort(key=lambda x: x[0])
+    return rows
+
+
+def parse_with_pymupdf_fallback(pdf_path: Path):
+    rows = []
+    seen = set()
+
+    doc = fitz.open(str(pdf_path))
 
     for page in doc:
         text = page.get_text("text")
-        lines = [clean(line) for line in text.splitlines() if clean(line)]
+        lines = [clean(corrigir_texto(line)) for line in text.splitlines() if clean(line)]
 
         i = 0
         while i < len(lines):
             line = lines[i]
 
-            # início de item: 001 MARCA ...
             m = re.match(r"^(\d{3})\s+(.+)$", line)
             if not m:
                 i += 1
@@ -88,28 +126,23 @@ def parse_pdf_with_pymupdf(pdf_path: Path):
             ordem = int(m.group(1))
             rest = m.group(2)
 
-            # ignora cabeçalhos e textos fora da listagem
-            if rest.startswith("PAI ") or "Rol de Produtos" in rest or "Nome da Família" in rest:
+            if "Rol de Produtos" in rest or "Nome da Família" in rest:
                 i += 1
                 continue
 
-            # monta bloco do item até achar código de barras
-            block = [rest]
+            bloco = [rest]
+            codigo = ""
             j = i + 1
-            codigo = None
 
             while j < len(lines):
                 current = lines[j]
 
-                # se encontrou próxima ordem antes de achar código, aborta item atual
                 if re.match(r"^\d{3}\s+.+$", current):
                     break
 
-                block.append(current)
+                bloco.append(current)
 
-                # código de barras costuma estar sozinho na linha
-                code_match = re.fullmatch(r"[\d\*\s]+", current)
-                if code_match:
+                if re.fullmatch(r"[\d\*\s]{8,}", current):
                     codigo = clean(current).replace(" ", "").replace("*", "")
                     j += 1
                     break
@@ -120,31 +153,21 @@ def parse_pdf_with_pymupdf(pdf_path: Path):
                 i += 1
                 continue
 
-            full = " ".join(block[:-1]).strip() if len(block) > 1 else block[0]
-
-            # tenta separar marca / modelo / descrição
-            # exemplos:
-            # SK TOYS SK-1169 - BRINQUEDO CARRINHO ...
-            # CFTOYS CF1028001 - BRINQUEDO TANQUE DE GUERRA ...
-            sep = " - "
-            if sep not in full:
+            full = " ".join(bloco[:-1]).strip() if len(bloco) > 1 else bloco[0]
+            if " - " not in full:
                 i = j
                 continue
 
-            left, right = full.split(sep, 1)
-
+            left, right = full.split(" - ", 1)
             left_parts = left.split()
             if len(left_parts) < 2:
                 i = j
                 continue
 
-            # modelo = último token da esquerda
             modelo_codigo = left_parts[-1]
             marca = " ".join(left_parts[:-1])
-
-            modelo = f"{modelo_codigo} - {right.split(' BRINQUEDO', 1)[0].strip()}" if " BRINQUEDO" in " " + right else f"{modelo_codigo} - {right.strip()}"
-
-            descricao = right.strip()
+            modelo = f"{modelo_codigo} - {right}"
+            descricao = right
 
             marca = clean(corrigir_texto(marca))
             modelo = clean(corrigir_texto(modelo))
@@ -162,12 +185,19 @@ def parse_pdf_with_pymupdf(pdf_path: Path):
     return rows
 
 
+def parse_pdf(pdf_path: Path):
+    rows = parse_with_pdfplumber_tables(pdf_path)
+    if rows:
+        return rows
+    return parse_with_pymupdf_fallback(pdf_path)
+
+
 if uploaded_file:
     with tempfile.TemporaryDirectory() as tmpdir:
-        pdf_path = Path(tmpdir) / "input.pdf"
+        pdf_path = Path(tmpdir) / uploaded_file.name
         pdf_path.write_bytes(uploaded_file.read())
 
-        rows = parse_pdf_with_pymupdf(pdf_path)
+        rows = parse_pdf(pdf_path)
 
         if not rows:
             st.error("Nenhum item válido foi encontrado no PDF.")
@@ -175,7 +205,6 @@ if uploaded_file:
 
         df = pd.DataFrame(rows, columns=["ORDEM", "MARCA", "MODELO", "DESC", "CODIGO"])
 
-        # validação
         for i, row in df.iterrows():
             if not row["CODIGO"]:
                 st.error(f"Código vazio na linha {i+1}")
@@ -202,15 +231,14 @@ if uploaded_file:
             linhas.append("</ArrayOfItemSolicitacao>")
             return "\n".join(linhas).strip()
 
-        xml1 = gerar(df, ",")
-        xml2 = gerar(df, ".")
+        xml_comma = gerar(df, ",")
+        xml_dot = gerar(df, ".")
 
-        zip_path = Path(tmpdir) / "resultado.zip"
-
+        zip_path = Path(tmpdir) / "resultado_final.zip"
         with zipfile.ZipFile(zip_path, "w") as zipf:
-            zipf.writestr("xml_comma.xml", xml1)
-            zipf.writestr("xml_dot.xml", xml2)
+            zipf.writestr("xml_comma.xml", xml_comma)
+            zipf.writestr("xml_dot.xml", xml_dot)
 
         st.success("Processado com sucesso!")
         with open(zip_path, "rb") as f:
-            st.download_button("Baixar ZIP", f, "resultado.zip")
+            st.download_button("Baixar ZIP", f, "resultado_final.zip")
