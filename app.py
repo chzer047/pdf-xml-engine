@@ -14,42 +14,51 @@ uploaded_file = st.file_uploader("Envie o PDF", type="pdf")
 
 erros = []
 
+
 def clean(x):
     if x is None:
         return ""
     return re.sub(r"\s+", " ", str(x).replace("\n", " ")).strip()
 
+
 def corrigir_texto(texto):
     if texto is None:
         return ""
-    texto = fix_text(str(texto))
-    return texto
+    return fix_text(str(texto))
 
-# 🔥 1 CÓDIGO POR ITEM
+
+# 🔥 REGRA: 1 CÓDIGO POR ITEM
 def extrair_codigo_unico(codigo_raw):
     if not codigo_raw:
         return None
+
     codigo = re.split(r"[\/\n]", codigo_raw)[0]
     codigo = re.sub(r"\D", "", codigo)
 
     if not codigo or not codigo.isdigit():
         return None
+
     if len(codigo) < 8 or len(codigo) > 14:
         return None
 
     return codigo
 
+
 def limitar_nome(nome):
     nome = clean(nome)
+
     if len(nome) > 200:
         nome = nome.replace("PRODUZIDO", "PROD.")
         nome = nome.replace("INDICATIVO", "IND.")
         nome = nome.replace("RESTRITIVO", "REST.")
         nome = nome[:200]
+
     return nome
+
 
 def escape_xml(texto):
     return str(texto).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
 
 def parse_pdf(pdf_path):
     rows = []
@@ -68,7 +77,7 @@ def parse_pdf(pdf_path):
                     ordem = int(ordem)
                     marca = clean(corrigir_texto(row[2]))
                     modelo = clean(corrigir_texto(row[3]))
-                    desc = clean(corrigir_texto(row[4]))
+                    nome = clean(corrigir_texto(row[4]))
 
                     codigo_raw = clean(corrigir_texto(row[5]))
                     codigo = extrair_codigo_unico(codigo_raw)
@@ -76,7 +85,7 @@ def parse_pdf(pdf_path):
                     if not codigo:
                         continue
 
-                    rows.append([ordem, marca, modelo, desc, codigo])
+                    rows.append([ordem, marca, modelo, nome, codigo])
 
     rows.sort(key=lambda x: x[0])
     return rows
@@ -98,7 +107,7 @@ if uploaded_file:
         st.success("Excel gerado no padrão do seu GPT ✅")
         st.dataframe(df)
 
-        # 🔥 GERAR XML
+        # 🔥 GERADOR XML (PADRÃO GPT)
         def gerar_xml(df, sufixo):
             linhas = [
                 '<?xml version="1.0" encoding="ISO-8859-1"?>',
@@ -128,8 +137,9 @@ if uploaded_file:
         zip_path = Path(tmpdir) / "resultado_xml.zip"
 
         with zipfile.ZipFile(zip_path, "w") as zipf:
-            zipf.writestr("xml_virgula.xml", xml_comma)
-            zipf.writestr("xml_ponto.xml", xml_dot)
+            # 🔥 CONVERSÃO REAL PARA ISO-8859-1
+            zipf.writestr("xml_virgula.xml", xml_comma.encode("ISO-8859-1", errors="replace"))
+            zipf.writestr("xml_ponto.xml", xml_dot.encode("ISO-8859-1", errors="replace"))
 
         with open(zip_path, "rb") as f:
             st.download_button("Baixar XMLs", f, "resultado_xml.zip")
