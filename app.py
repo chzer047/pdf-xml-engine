@@ -12,7 +12,7 @@ st.title("C XML BR Engine - PDF → XML")
 
 uploaded_file = st.file_uploader("Envie o PDF", type="pdf")
 
-erros = []  # 🔥 lista de debug
+erros = []
 
 
 def clean(x):
@@ -79,11 +79,25 @@ def is_item_row_table(row):
     return bool(re.fullmatch(r"\d{3}", ordem))
 
 
+def validar_codigo(codigo, ordem):
+    codigo = re.sub(r"\D", "", codigo)
+
+    if not codigo or not codigo.isdigit():
+        erros.append(f"Item {ordem} ignorado: código inválido ({codigo})")
+        return None
+
+    if len(codigo) < 8 or len(codigo) > 14:
+        erros.append(f"Item {ordem} ignorado: tamanho inválido ({codigo})")
+        return None
+
+    return codigo
+
+
 def parse_pdf(pdf_path):
     rows = []
     seen = set()
 
-    # 🔹 TENTA VIA TABELA (principal)
+    # 🔹 TABELA (PRINCIPAL)
     with pdfplumber.open(str(pdf_path)) as pdf:
         for page in pdf.pages:
             for table in page.extract_tables() or []:
@@ -95,30 +109,28 @@ def parse_pdf(pdf_path):
                     marca = clean(corrigir_texto(row[2]))
                     modelo = clean(corrigir_texto(row[3]))
                     descricao = clean(corrigir_texto(row[4]))
-                    codigo = clean(corrigir_texto(row[5])).replace(" ", "").replace("*", "")
+                    codigo = clean(corrigir_texto(row[5]))
 
-                    # 🔥 VALIDAÇÕES
+                    codigo = validar_codigo(codigo, ordem)
+                    if not codigo:
+                        continue
+
                     if not marca or not modelo or not descricao:
                         erros.append(f"Item {ordem} ignorado: campo vazio")
                         continue
 
-                    if not codigo or len(codigo) < 8:
-                        erros.append(f"Item {ordem} ignorado: código inválido ({codigo})")
-                        continue
-
-                    key = (ordem, marca, modelo, codigo)
+                    key = (ordem, modelo, codigo)
                     if key in seen:
                         continue
                     seen.add(key)
 
                     rows.append([ordem, marca, modelo, descricao, codigo])
 
-    # 🔹 SE ACHOU → retorna
     if rows:
         rows.sort(key=lambda x: x[0])
         return rows
 
-    # 🔹 FALLBACK PYMUPDF
+    # 🔹 FALLBACK
     doc = fitz.open(str(pdf_path))
 
     for page in doc:
@@ -143,17 +155,12 @@ def parse_pdf(pdf_path):
             codigo = partes[-1]
             descricao = " ".join(partes[2:-1])
 
-            marca = clean(marca)
-            modelo = clean(modelo)
-            descricao = clean(descricao)
-            codigo = clean(codigo)
+            codigo = validar_codigo(codigo, ordem)
+            if not codigo:
+                continue
 
             if not marca or not modelo or not descricao:
                 erros.append(f"Item {ordem} ignorado: campo vazio")
-                continue
-
-            if not codigo or len(codigo) < 8:
-                erros.append(f"Item {ordem} ignorado: código inválido ({codigo})")
                 continue
 
             rows.append([ordem, marca, modelo, descricao, codigo])
@@ -207,14 +214,10 @@ if uploaded_file:
 
         st.success("Processado com sucesso!")
 
-        # 🔥 DEBUG VISUAL (SEGURO)
         if erros:
-            st.warning("Alguns itens foram ignorados automaticamente:")
+            st.warning("Itens ignorados automaticamente:")
             for e in erros[:10]:
                 st.write(e)
-
-            if len(erros) > 10:
-                st.write(f"... e mais {len(erros)-10} itens com problema")
 
         with open(zip_path, "rb") as f:
             st.download_button("Baixar ZIP", f, "resultado_final.zip")
