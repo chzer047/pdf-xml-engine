@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS certificados (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ip_bri TEXT UNIQUE,
     produto TEXT,
+    fabricante TEXT,
     data_emissao TEXT,
     data_validade TEXT,
     arquivo_pdf TEXT,
@@ -45,6 +46,14 @@ CREATE TABLE IF NOT EXISTS itens (
 """)
 
 conn.commit()
+
+# Adiciona fabricante caso o banco antigo já exista
+try:
+    cursor.execute("ALTER TABLE certificados ADD COLUMN fabricante TEXT")
+    conn.commit()
+except sqlite3.OperationalError:
+    pass
+
 
 # =========================
 # FUNÇÕES
@@ -103,13 +112,34 @@ def verificar_codigos_duplicados(df):
     return duplicados
 
 
-def extrair_dados_certificado(pdf_path):
+def extrair_fabricante_primeira_pagina(pdf_path):
+    doc = fitz.open(str(pdf_path))
 
+    if len(doc) == 0:
+        return None
+
+    texto = doc[0].get_text()
+    texto = corrigir_texto(texto)
+
+    match = re.search(
+        r"Fabricante:\s*(.+?)(?=\n\s*(Importador|CNPJ|Produto|Modelo|Marca|Norma|Data|Página|Numero|Número|$))",
+        texto,
+        flags=re.IGNORECASE | re.DOTALL
+    )
+
+    if match:
+        fabricante = clean(match.group(1))
+        return fabricante
+
+    return None
+
+
+def extrair_dados_certificado(pdf_path):
     doc = fitz.open(str(pdf_path))
     texto = ""
 
     for page in doc:
-        texto += page.get_text()
+        texto += page.get_text() + "\n"
 
     texto = corrigir_texto(texto)
 
@@ -134,26 +164,24 @@ def extrair_dados_certificado(pdf_path):
         data_emissao = datas[0]
         data_validade = datas[1]
 
+    fabricante = extrair_fabricante_primeira_pagina(pdf_path)
+
     return {
         "ip_bri": ip_bri,
         "produto": produto,
+        "fabricante": fabricante,
         "data_emissao": data_emissao,
         "data_validade": data_validade
     }
 
 
 def parse_pdf(pdf_path):
-
     rows = []
 
     with pdfplumber.open(str(pdf_path)) as pdf:
-
         for page in pdf.pages:
-
             for table in page.extract_tables() or []:
-
                 for row in table:
-
                     if not row or len(row) < 6:
                         continue
 
@@ -188,14 +216,12 @@ def parse_pdf(pdf_path):
 
 
 def gerar_xml(df, sufixo):
-
     linhas = [
         '<?xml version="1.0" encoding="ISO-8859-1"?>',
         '<ArrayOfItemSolicitacao>'
     ]
 
     for _, r in df.iterrows():
-
         modelo = r["MODELO"].rstrip(".,") + sufixo
 
         linhas.append(f"""
@@ -213,8 +239,9 @@ def gerar_xml(df, sufixo):
 
     return "\n".join(linhas)
 
+
 # =========================
-# TABS
+# INTERFACE
 # =========================
 
 aba1, aba2 = st.tabs([
@@ -222,25 +249,23 @@ aba1, aba2 = st.tabs([
     "Banco de Certificados"
 ])
 
+
 # =========================
 # ABA 1 - XML ORIGINAL
 # =========================
 
 with aba1:
-
     st.title("C XML BR Engine - PDF → XML")
 
     uploaded_file = st.file_uploader(
         "Envie o PDF",
-        type="pdf"
+        type="pdf",
+        key="xml_pdf"
     )
 
     if uploaded_file:
-
         with tempfile.TemporaryDirectory() as tmpdir:
-
             pdf_path = Path(tmpdir) / uploaded_file.name
-
             pdf_path.write_bytes(uploaded_file.read())
 
             rows = parse_pdf(pdf_path)
@@ -261,7 +286,6 @@ with aba1:
             )
 
             st.success("Itens extraídos com sucesso ✅")
-
             st.dataframe(df)
 
             xml_comma = gerar_xml(df, ",")
@@ -270,7 +294,6 @@ with aba1:
             zip_path = Path(tmpdir) / "resultado_xml.zip"
 
             with zipfile.ZipFile(zip_path, "w") as zipf:
-
                 zipf.writestr(
                     "xml_virgula.xml",
                     xml_comma.encode(
@@ -288,19 +311,18 @@ with aba1:
                 )
 
             with open(zip_path, "rb") as f:
-
                 st.download_button(
                     "Baixar XMLs",
                     f,
                     "resultado_xml.zip"
                 )
 
+
 # =========================
 # ABA 2 - BANCO
 # =========================
 
 with aba2:
-
     st.title("Banco de Certificados")
 
     banco_file = st.file_uploader(
@@ -310,23 +332,29 @@ with aba2:
     )
 
     if banco_file:
-
         with tempfile.TemporaryDirectory() as tmpdir:
-
             pdf_path = Path(tmpdir) / banco_file.name
-
             pdf_path.write_bytes(banco_file.read())
 
             dados_certificado = extrair_dados_certificado(pdf_path)
-
             rows = parse_pdf(pdf_path)
 
             st.subheader("Dados do Certificado")
 
-            st.write(dados_certificado)
+            col1, col2, col3, col4 = st.columns(4)
+
+            col1.metric("IP-BRI", dados_certificado["ip_bri"] or "Não encontrado")
+            col2.metric("Produto", dados_certificado["produto"] or "Não encontrado")
+            col3.metric("Emissão", dados_certificado["data_emissao"] or "Não encontrado")
+            col4.metric("Validade", dados_certificado["data_validade"] or "Não encontrado")
+
+            st.text_area(
+                "Fabricante",
+                dados_certificado["fabricante"] or "Não encontrado",
+                height=90
+            )
 
             if rows:
-
                 df_preview = pd.DataFrame(
                     rows,
                     columns=[
@@ -341,11 +369,9 @@ with aba2:
                 st.subheader("Itens encontrados")
                 st.dataframe(df_preview, use_container_width=True)
 
-                # 🔥 DUPLICADOS
                 duplicados = verificar_codigos_duplicados(df_preview)
 
                 if not duplicados.empty:
-
                     st.warning(
                         "Foram encontrados códigos de barras duplicados neste certificado."
                     )
@@ -356,26 +382,25 @@ with aba2:
                     )
 
                 if st.button("Salvar no banco"):
-
                     if not dados_certificado["ip_bri"]:
                         st.error("IP-BRI não encontrado.")
                     else:
-
                         try:
-
                             cursor.execute("""
                             INSERT INTO certificados (
                                 ip_bri,
                                 produto,
+                                fabricante,
                                 data_emissao,
                                 data_validade,
                                 arquivo_pdf,
                                 data_cadastro
                             )
-                            VALUES (?, ?, ?, ?, ?, ?)
+                            VALUES (?, ?, ?, ?, ?, ?, ?)
                             """, (
                                 dados_certificado["ip_bri"],
                                 dados_certificado["produto"],
+                                dados_certificado["fabricante"],
                                 dados_certificado["data_emissao"],
                                 dados_certificado["data_validade"],
                                 banco_file.name,
@@ -383,11 +408,9 @@ with aba2:
                             ))
 
                             conn.commit()
-
                             certificado_id = cursor.lastrowid
 
                             for r in rows:
-
                                 cursor.execute("""
                                 INSERT INTO itens (
                                     certificado_id,
@@ -412,8 +435,10 @@ with aba2:
                             st.success("Certificado salvo com sucesso ✅")
 
                         except sqlite3.IntegrityError:
-
                             st.error("Esse IP-BRI já existe no banco.")
+
+            else:
+                st.warning("Nenhum item válido encontrado nesse PDF.")
 
     st.divider()
 
@@ -426,6 +451,7 @@ with aba2:
         id,
         ip_bri,
         produto,
+        fabricante,
         data_emissao,
         data_validade
     FROM certificados
@@ -434,7 +460,6 @@ with aba2:
     params = ()
 
     if busca:
-
         query += " WHERE ip_bri LIKE ?"
         params = (f"%{busca}%",)
 
@@ -444,10 +469,9 @@ with aba2:
         params=params
     )
 
-    st.dataframe(certificados)
+    st.dataframe(certificados, use_container_width=True)
 
     if not certificados.empty:
-
         cert_id = st.selectbox(
             "Selecionar certificado",
             certificados["id"]
@@ -472,19 +496,13 @@ with aba2:
         st.subheader("Itens separados por marca")
 
         if itens.empty:
-
-            st.warning(
-                "Nenhum item encontrado para este certificado."
-            )
-
+            st.warning("Nenhum item encontrado para este certificado.")
         else:
-
             marcas = sorted(
                 itens["marca"].dropna().unique()
             )
 
             for marca in marcas:
-
                 itens_marca = itens[
                     itens["marca"] == marca
                 ].copy()
@@ -501,3 +519,53 @@ with aba2:
                     itens_marca,
                     use_container_width=True
                 )
+
+    st.divider()
+
+    st.subheader("Filtro geral por Marca")
+
+    marcas_banco = pd.read_sql_query("""
+    SELECT DISTINCT marca
+    FROM itens
+    WHERE marca IS NOT NULL AND marca != ''
+    ORDER BY marca
+    """, conn)
+
+    if marcas_banco.empty:
+        st.info("Nenhuma marca cadastrada no banco ainda.")
+    else:
+        marca_filtro = st.selectbox(
+            "Selecione uma marca para buscar em todos os IP-BRI",
+            marcas_banco["marca"].tolist()
+        )
+
+        resultado_marca = pd.read_sql_query("""
+        SELECT
+            c.ip_bri,
+            c.produto,
+            c.fabricante,
+            c.data_emissao,
+            c.data_validade,
+            i.ordem,
+            i.marca,
+            i.modelo,
+            i.nome,
+            i.codigo
+        FROM itens i
+        INNER JOIN certificados c ON c.id = i.certificado_id
+        WHERE i.marca = ?
+        ORDER BY c.ip_bri, i.ordem
+        """, conn, params=(marca_filtro,))
+
+        st.dataframe(resultado_marca, use_container_width=True)
+
+        if not resultado_marca.empty:
+            st.download_button(
+                "Baixar resultado da marca em CSV",
+                resultado_marca.to_csv(index=False, sep=";").encode(
+                    "ISO-8859-1",
+                    errors="replace"
+                ),
+                f"marca_{marca_filtro}.csv",
+                "text/csv"
+            )
