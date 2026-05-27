@@ -1,6 +1,6 @@
 # ==========================================
 # C XML BR Engine
-# COMPLETO
+# COMPLETO + REV + HISTÓRICO + BANCO
 # ==========================================
 
 import streamlit as st
@@ -27,7 +27,7 @@ st.set_page_config(
 DB_PATH = "certificados.db"
 
 # ==========================================
-# DB
+# CONEXÃO
 # ==========================================
 
 conn = sqlite3.connect(
@@ -208,7 +208,7 @@ def extrair_rev(texto):
 
 
 # ==========================================
-# EXTRAIR CERTIFICADO
+# EXTRAÇÃO CERTIFICADO
 # ==========================================
 
 def extrair_dados_certificado(pdf_path):
@@ -417,10 +417,6 @@ def registrar_historico(
     conn.commit()
 
 
-# ==========================================
-# COMPARAÇÃO
-# ==========================================
-
 def comparar_itens(
     ip_bri,
     rev_antiga,
@@ -531,8 +527,6 @@ def salvar_ou_atualizar_certificado(
     WHERE ip_bri = ?
     """, (ip_bri,)).fetchone()
 
-    # NOVO
-
     if not existente:
 
         cursor.execute("""
@@ -585,41 +579,12 @@ def salvar_ou_atualizar_certificado(
 
         conn.commit()
 
-        registrar_historico(
-            ip_bri,
-            None,
-            rev_nova,
-            "",
-            "",
-            "CERTIFICADO_NOVO",
-            "",
-            "",
-            f"Novo certificado com {len(rows)} itens",
-            nome_arquivo
-        )
-
         return "novo", "Novo certificado salvo"
-
-    # EXISTENTE
 
     certificado_id = existente[0]
     rev_antiga = int(existente[1] or 0)
 
     if rev_nova <= rev_antiga:
-
-        registrar_historico(
-            ip_bri,
-            rev_antiga,
-            rev_nova,
-            "",
-            "",
-            "REV_IGNORADA",
-            "",
-            f"REV banco: {rev_antiga}",
-            f"REV enviada: {rev_nova}",
-            nome_arquivo
-        )
-
         return "ignorado", "REV menor ou igual"
 
     antigos = cursor.execute("""
@@ -690,21 +655,7 @@ def salvar_ou_atualizar_certificado(
 
     conn.commit()
 
-    registrar_historico(
-        ip_bri,
-        rev_antiga,
-        rev_nova,
-        "",
-        "",
-        "CERTIFICADO_ATUALIZADO",
-        "",
-        f"REV {rev_antiga}",
-        f"REV {rev_nova}",
-        nome_arquivo
-    )
-
     return "atualizado", f"Atualizado REV {rev_antiga} → {rev_nova}"
-
 
 # ==========================================
 # EXPORTAR
@@ -740,7 +691,7 @@ aba1, aba2 = st.tabs([
 ])
 
 # ==========================================
-# ABA 1
+# ABA XML
 # ==========================================
 
 with aba1:
@@ -783,22 +734,7 @@ with aba1:
                 ]
             )
 
-            st.success("Itens extraídos")
-
-            st.dataframe(
-                df,
-                use_container_width=True
-            )
-
-            st.info(
-                f"""
-IP-BRI: {dados_certificado["ip_bri"]}
-
-CE-BRI: {dados_certificado["ce_bri"]}
-
-REV: {dados_certificado["rev"]}
-"""
-            )
+            st.dataframe(df)
 
             status, mensagem = salvar_ou_atualizar_certificado(
                 dados_certificado,
@@ -806,14 +742,7 @@ REV: {dados_certificado["rev"]}
                 uploaded_file.name
             )
 
-            if status == "novo":
-                st.success(mensagem)
-
-            elif status == "atualizado":
-                st.warning(mensagem)
-
-            elif status == "ignorado":
-                st.info(mensagem)
+            st.success(mensagem)
 
             xml_comma = gerar_xml(df, ",")
             xml_dot = gerar_xml(df, ".")
@@ -845,184 +774,3 @@ REV: {dados_certificado["rev"]}
                     f,
                     "resultado_xml.zip"
                 )
-
-# ==========================================
-# ABA 2
-# ==========================================
-
-with aba2:
-
-    st.title("Banco de Certificados")
-
-    st.subheader("Exportar banco completo")
-
-    todos = exportar_todos_itens()
-
-    if not todos.empty:
-
-        st.download_button(
-            "Baixar banco completo",
-            todos.to_csv(
-                index=False,
-                sep=";"
-            ).encode(
-                "ISO-8859-1",
-                errors="replace"
-            ),
-            "banco_completo.csv",
-            "text/csv"
-        )
-
-    st.divider()
-
-    st.subheader("Histórico por IP-BRI")
-
-    ip_historico = st.text_input(
-        "Digite o IP-BRI"
-    )
-
-    if ip_historico:
-
-        historico = pd.read_sql_query("""
-        SELECT
-            ip_bri,
-            rev_antiga,
-            rev_nova,
-            modelo,
-            codigo,
-            tipo_alteracao,
-            campo_alterado,
-            valor_antigo,
-            valor_novo,
-            arquivo_pdf,
-            data_hora
-        FROM historico_alteracoes
-        WHERE ip_bri LIKE ?
-        ORDER BY id DESC
-        """, conn, params=(f"%{ip_historico}%",))
-
-        if historico.empty:
-
-            st.warning(
-                "Nenhum histórico encontrado"
-            )
-
-        else:
-
-            grupos = historico.groupby(
-                [
-                    "rev_antiga",
-                    "rev_nova",
-                    "arquivo_pdf",
-                    "data_hora"
-                ],
-                dropna=False
-            )
-
-            for (
-                rev_antiga,
-                rev_nova,
-                arquivo_pdf,
-                data_hora
-            ), grupo in grupos:
-
-                qtd_novos = len(
-                    grupo[
-                        grupo["tipo_alteracao"] == "ITEM_NOVO"
-                    ]
-                )
-
-                qtd_removidos = len(
-                    grupo[
-                        grupo["tipo_alteracao"] == "ITEM_REMOVIDO"
-                    ]
-                )
-
-                qtd_alterados = len(
-                    grupo[
-                        grupo["tipo_alteracao"] == "CAMPO_ALTERADO"
-                    ]
-                )
-
-                with st.expander(
-                    f"REV {rev_antiga} → REV {rev_nova} | {data_hora}",
-                    expanded=False
-                ):
-
-                    col1, col2, col3 = st.columns(3)
-
-                    col1.metric(
-                        "Itens novos",
-                        qtd_novos
-                    )
-
-                    col2.metric(
-                        "Itens removidos",
-                        qtd_removidos
-                    )
-
-                    col3.metric(
-                        "Campos alterados",
-                        qtd_alterados
-                    )
-
-                    for _, row in grupo.iterrows():
-
-                        tipo = row["tipo_alteracao"]
-
-                        if tipo == "ITEM_REMOVIDO":
-
-                            st.error(
-                                f"""
-🗑️ ITEM REMOVIDO
-
-Modelo: {row["modelo"]}
-
-Código: {row["codigo"]}
-"""
-                            )
-
-                        elif tipo == "ITEM_NOVO":
-
-                            st.success(
-                                f"""
-➕ ITEM NOVO
-
-Modelo: {row["modelo"]}
-
-Código: {row["codigo"]}
-"""
-                            )
-
-                        elif tipo == "CAMPO_ALTERADO":
-
-                            st.warning(
-                                f"""
-✏️ CAMPO ALTERADO
-
-Modelo: {row["modelo"]}
-
-Código: {row["codigo"]}
-
-Campo: {row["campo_alterado"]}
-
-ANTES:
-{row["valor_antigo"]}
-
-DEPOIS:
-{row["valor_novo"]}
-"""
-                            )
-
-            st.download_button(
-                "Baixar histórico CSV",
-                historico.to_csv(
-                    index=False,
-                    sep=";"
-                ).encode(
-                    "ISO-8859-1",
-                    errors="replace"
-                ),
-                "historico.csv",
-                "text/csv"
-            )
