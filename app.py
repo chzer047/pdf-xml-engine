@@ -742,6 +742,11 @@ def ler_registros_aba(excel_file, aba):
     dados = dados.dropna(how="all")
 
     dados["FAMILIA"] = dados["FAMILIA"].apply(normalizar_familia)
+
+    # Mantém apenas famílias numéricas
+    dados = dados[
+        dados["FAMILIA"].astype(str).str.fullmatch(r"\d+")
+    ]
     dados["REGISTRO"] = dados["REGISTRO"].astype(str).str.strip()
 
     dados = dados[
