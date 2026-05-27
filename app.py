@@ -1185,134 +1185,51 @@ with aba3:
 # ABA 4 - REGISTROS
 # ==========================================
 
-with aba4:
-
-    st.title("Registros")
-
-    st.info("""
-Envie o Excel de registros da BOLSA.
-
-Cada aba do Excel = uma fábrica.
-
-O sistema irá:
-- identificar a fábrica pela aba;
-- ler coluna FAMÍLIA;
-- ler coluna REGISTRO;
-- cruzar automaticamente com CE-BRI/IP-BRI futuramente.
-""")
-
-    registro_excel = st.file_uploader(
-        "Envie o Excel de Registros",
-        type=["xlsx", "xls"],
-        key="excel_registros"
+def ler_registros_aba(excel_file, aba):
+    bruto = pd.read_excel(
+        excel_file,
+        sheet_name=aba,
+        header=None
     )
 
-    if registro_excel:
+    linha_cabecalho = None
+    col_familia = None
+    col_registro = None
 
-        try:
+    for i, row in bruto.iterrows():
+        valores = [str(v).strip().upper() for v in row.values]
 
-            excel = pd.ExcelFile(registro_excel)
+        for idx, valor in enumerate(valores):
+            if "FAMILIA" in valor or "FAMÍLIA" in valor:
+                linha_cabecalho = i
+                col_familia = idx
 
-            abas = excel.sheet_names
+            if "REGISTRO" in valor:
+                linha_cabecalho = i
+                col_registro = idx
 
-            st.success(f"{len(abas)} fábricas encontradas ✅")
+        if linha_cabecalho is not None and col_familia is not None and col_registro is not None:
+            break
 
-            todas_fabricas = []
+    if linha_cabecalho is None:
+        return None
 
-            for aba in abas:
+    dados = bruto.iloc[linha_cabecalho + 1:, [col_familia, col_registro]].copy()
 
-                st.divider()
+    dados.columns = ["FAMILIA", "REGISTRO"]
 
-                st.subheader(f"Fábrica: {aba}")
+    dados = dados.dropna(how="all")
 
-                try:
+    dados["FAMILIA"] = dados["FAMILIA"].astype(str).str.strip()
+    dados["REGISTRO"] = dados["REGISTRO"].astype(str).str.strip()
 
-                    df = pd.read_excel(
-                        registro_excel,
-                        sheet_name=aba
-                    )
+    dados = dados[
+        (dados["FAMILIA"] != "") &
+        (dados["FAMILIA"].str.lower() != "nan") &
+        (dados["REGISTRO"] != "") &
+        (dados["REGISTRO"].str.lower() != "nan")
+    ]
 
-                    df.columns = [
-                        str(c).strip().upper()
-                        for c in df.columns
-                    ]
+    dados["FABRICA"] = aba
 
-                    coluna_familia = None
-                    coluna_registro = None
-
-                    for c in df.columns:
-
-                        if "FAM" in c:
-                            coluna_familia = c
-
-                        if "REG" in c:
-                            coluna_registro = c
-
-                    if not coluna_familia or not coluna_registro:
-
-                        st.warning(
-                            f"Aba {aba} não possui colunas FAMÍLIA/REGISTRO válidas."
-                        )
-
-                        continue
-
-                    df_filtrado = df[
-                        [coluna_familia, coluna_registro]
-                    ].copy()
-
-                    df_filtrado.columns = [
-                        "FAMILIA",
-                        "REGISTRO"
-                    ]
-
-                    df_filtrado = df_filtrado.dropna(
-                        subset=["FAMILIA"]
-                    )
-
-                    df_filtrado["FABRICA"] = aba
-
-                    st.dataframe(
-                        df_filtrado,
-                        use_container_width=True
-                    )
-
-                    todas_fabricas.append(df_filtrado)
-
-                except Exception as e:
-
-                    st.error(
-                        f"Erro na aba {aba}: {e}"
-                    )
-
-            if todas_fabricas:
-
-                banco_registros = pd.concat(
-                    todas_fabricas,
-                    ignore_index=True
-                )
-
-                st.divider()
-
-                st.subheader("Banco Geral de Registros")
-
-                st.dataframe(
-                    banco_registros,
-                    use_container_width=True
-                )
-
-                st.download_button(
-                    "Baixar registros tratados CSV",
-                    banco_registros.to_csv(
-                        index=False,
-                        sep=";"
-                    ).encode(
-                        "ISO-8859-1",
-                        errors="replace"
-                    ),
-                    "registros_tratados.csv",
-                    "text/csv"
-                )
-
-        except Exception as e:
-
-            st.error(f"Erro ao ler Excel: {e}")
+    return dados
