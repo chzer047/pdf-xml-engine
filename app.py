@@ -1555,6 +1555,10 @@ with aba3:
     )
 
     if busca_ip:
+        busca_limpa = clean(busca_ip).upper()
+
+        # Busca flexível: aceita IP completo ou parte dele.
+        # Exemplo: 0779/2025-23, IP-BRI-0779/2025-23, 2025-23 etc.
         itens_ip = pd.read_sql_query("""
         SELECT
             i.marca AS marca,
@@ -1576,12 +1580,35 @@ with aba3:
         LEFT JOIN registros r
         ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
         AND r.familia = CAST(CAST(substr(c.ip_bri, -2) AS INTEGER) AS TEXT)
-        WHERE c.ip_bri LIKE ?
+        WHERE UPPER(c.ip_bri) LIKE ?
+        OR REPLACE(UPPER(c.ip_bri), 'IP-BRI-', '') LIKE ?
         ORDER BY i.marca, i.modelo, i.ordem
-        """, conn, params=(f"%{busca_ip}%",))
+        """, conn, params=(f"%{busca_limpa}%", f"%{busca_limpa.replace('IP-BRI-', '')}%"))
 
         if itens_ip.empty:
             st.warning("Nenhum item encontrado para esse IP-BRI.")
+
+            certificados_encontrados = pd.read_sql_query("""
+            SELECT
+                id,
+                ip_bri,
+                ce_bri,
+                rev,
+                produto,
+                data_emissao,
+                arquivo_pdf,
+                data_cadastro,
+                data_atualizacao
+            FROM certificados
+            WHERE UPPER(ip_bri) LIKE ?
+            OR REPLACE(UPPER(ip_bri), 'IP-BRI-', '') LIKE ?
+            ORDER BY ip_bri
+            """, conn, params=(f"%{busca_limpa}%", f"%{busca_limpa.replace('IP-BRI-', '')}%"))
+
+            if not certificados_encontrados.empty:
+                st.info("O certificado existe no banco, mas não possui itens vinculados.")
+                st.dataframe(certificados_encontrados, use_container_width=True)
+
         else:
             st.success(f"{len(itens_ip)} itens encontrados ✅")
             st.dataframe(itens_ip, use_container_width=True)
@@ -1592,7 +1619,7 @@ with aba3:
                     "ISO-8859-1",
                     errors="replace"
                 ),
-                f"{busca_ip.replace('/', '-')}.csv",
+                f"{busca_limpa.replace('/', '-')}.csv",
                 "text/csv"
             )
 
