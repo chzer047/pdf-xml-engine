@@ -1,6 +1,6 @@
 # ==========================================
 # C XML BR Engine
-# REV + Histórico Inteligente
+# COMPLETO
 # ==========================================
 
 import streamlit as st
@@ -27,7 +27,7 @@ st.set_page_config(
 DB_PATH = "certificados.db"
 
 # ==========================================
-# CONEXÃO DB
+# DB
 # ==========================================
 
 conn = sqlite3.connect(
@@ -87,7 +87,7 @@ CREATE TABLE IF NOT EXISTS historico_alteracoes (
 conn.commit()
 
 # ==========================================
-# FUNÇÕES GERAIS
+# FUNÇÕES
 # ==========================================
 
 def clean(x):
@@ -162,6 +162,23 @@ def escape_xml(texto):
         .replace(">", "&gt;")
 
 
+def verificar_codigos_duplicados(df):
+
+    duplicados = df[
+        df.duplicated(
+            subset=["CODIGO"],
+            keep=False
+        )
+    ].copy()
+
+    if not duplicados.empty:
+        duplicados = duplicados.sort_values(
+            by="CODIGO"
+        )
+
+    return duplicados
+
+
 # ==========================================
 # REV
 # ==========================================
@@ -191,7 +208,7 @@ def extrair_rev(texto):
 
 
 # ==========================================
-# EXTRAIR DADOS CERTIFICADO
+# EXTRAIR CERTIFICADO
 # ==========================================
 
 def extrair_dados_certificado(pdf_path):
@@ -401,7 +418,7 @@ def registrar_historico(
 
 
 # ==========================================
-# COMPARAR ITENS
+# COMPARAÇÃO
 # ==========================================
 
 def comparar_itens(
@@ -421,7 +438,6 @@ def comparar_itens(
         r[2]: r for r in novos
     }
 
-    # removidos
     for modelo in antigos_dict:
 
         if modelo not in novos_dict:
@@ -441,7 +457,6 @@ def comparar_itens(
                 arquivo
             )
 
-    # novos
     for modelo in novos_dict:
 
         if modelo not in antigos_dict:
@@ -461,7 +476,6 @@ def comparar_itens(
                 arquivo
             )
 
-    # alterados
     for modelo in novos_dict:
 
         if modelo in antigos_dict:
@@ -517,9 +531,7 @@ def salvar_ou_atualizar_certificado(
     WHERE ip_bri = ?
     """, (ip_bri,)).fetchone()
 
-    # ==========================================
     # NOVO
-    # ==========================================
 
     if not existente:
 
@@ -588,9 +600,7 @@ def salvar_ou_atualizar_certificado(
 
         return "novo", "Novo certificado salvo"
 
-    # ==========================================
     # EXISTENTE
-    # ==========================================
 
     certificado_id = existente[0]
     rev_antiga = int(existente[1] or 0)
@@ -612,7 +622,6 @@ def salvar_ou_atualizar_certificado(
 
         return "ignorado", "REV menor ou igual"
 
-    # itens antigos
     antigos = cursor.execute("""
     SELECT
         ordem,
@@ -633,13 +642,11 @@ def salvar_ou_atualizar_certificado(
         nome_arquivo
     )
 
-    # apaga antigos
     cursor.execute("""
     DELETE FROM itens
     WHERE certificado_id = ?
     """, (certificado_id,))
 
-    # atualiza certificado
     cursor.execute("""
     UPDATE certificados
     SET
@@ -660,7 +667,6 @@ def salvar_ou_atualizar_certificado(
         certificado_id
     ))
 
-    # insere novos
     for r in rows:
 
         cursor.execute("""
@@ -701,7 +707,7 @@ def salvar_ou_atualizar_certificado(
 
 
 # ==========================================
-# EXPORTAR TUDO
+# EXPORTAR
 # ==========================================
 
 def exportar_todos_itens():
@@ -724,7 +730,6 @@ def exportar_todos_itens():
     ORDER BY i.marca, i.modelo
     """, conn)
 
-
 # ==========================================
 # TABS
 # ==========================================
@@ -735,7 +740,7 @@ aba1, aba2 = st.tabs([
 ])
 
 # ==========================================
-# ABA XML
+# ABA 1
 # ==========================================
 
 with aba1:
@@ -744,8 +749,7 @@ with aba1:
 
     uploaded_file = st.file_uploader(
         "Envie o PDF",
-        type="pdf",
-        key="xml_pdf"
+        type="pdf"
     )
 
     if uploaded_file:
@@ -843,7 +847,7 @@ REV: {dados_certificado["rev"]}
                 )
 
 # ==========================================
-# ABA BANCO
+# ABA 2
 # ==========================================
 
 with aba2:
