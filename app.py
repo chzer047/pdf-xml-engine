@@ -2203,10 +2203,10 @@ with aba5:
     )
 
     arquivo_confirmacao = st.file_uploader(
-        "Envie o Excel de confirmação",
-        type=["xlsx", "xlsm"],
-        key="excel_confirmacao"
-    )
+    "Envie o Excel de confirmação",
+    type=["xlsx", "xlsm", "xls"],
+    key="excel_confirmacao"
+)
 
     if arquivo_confirmacao:
         try:
