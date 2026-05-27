@@ -106,10 +106,24 @@ conn.commit()
 for tabela, coluna, tipo in [
     ("registros", "cliente_base", "TEXT"),
     ("registros", "ce_bri", "TEXT"),
+    ("registros", "familia", "TEXT"),
+    ("registros", "registro", "TEXT"),
+    ("registros", "fabrica", "TEXT"),
     ("registros", "arquivo_excel", "TEXT"),
     ("registros", "data_cadastro", "TEXT"),
+    ("certificados", "produto", "TEXT"),
+    ("certificados", "ce_bri", "TEXT"),
     ("certificados", "rev", "INTEGER"),
+    ("certificados", "data_emissao", "TEXT"),
+    ("certificados", "arquivo_pdf", "TEXT"),
+    ("certificados", "data_cadastro", "TEXT"),
     ("certificados", "data_atualizacao", "TEXT"),
+    ("itens", "certificado_id", "INTEGER"),
+    ("itens", "ordem", "INTEGER"),
+    ("itens", "marca", "TEXT"),
+    ("itens", "modelo", "TEXT"),
+    ("itens", "nome", "TEXT"),
+    ("itens", "codigo", "TEXT"),
 ]:
     try:
         cursor.execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {tipo}")
@@ -524,11 +538,47 @@ def comparar_itens(
 # ==========================================
 
 
+def garantir_estrutura_banco():
+    ajustes = [
+        ("itens", "certificado_id", "INTEGER"),
+        ("itens", "ordem", "INTEGER"),
+        ("itens", "marca", "TEXT"),
+        ("itens", "modelo", "TEXT"),
+        ("itens", "nome", "TEXT"),
+        ("itens", "codigo", "TEXT"),
+        ("certificados", "ce_bri", "TEXT"),
+        ("certificados", "rev", "INTEGER"),
+        ("certificados", "data_atualizacao", "TEXT"),
+        ("registros", "cliente_base", "TEXT"),
+        ("registros", "ce_bri", "TEXT"),
+        ("registros", "familia", "TEXT"),
+        ("registros", "registro", "TEXT"),
+        ("registros", "fabrica", "TEXT"),
+        ("registros", "arquivo_excel", "TEXT"),
+        ("registros", "data_cadastro", "TEXT"),
+    ]
+
+    for tabela, coluna, tipo in ajustes:
+        try:
+            cursor.execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {tipo}")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+    try:
+        cursor.execute("UPDATE registros SET cliente_base = 'BOLSA' WHERE cliente_base IS NULL OR cliente_base = ''")
+        conn.commit()
+    except Exception:
+        pass
+
+
+
 def salvar_ou_atualizar_certificado(
     dados_certificado,
     rows,
     nome_arquivo
 ):
+    garantir_estrutura_banco()
     ip_bri = dados_certificado["ip_bri"]
     rev_nova = dados_certificado["rev"]
 
