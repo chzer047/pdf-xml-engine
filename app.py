@@ -100,6 +100,30 @@ CREATE TABLE IF NOT EXISTS registros (
 conn.commit()
 
 # ==========================================
+# AJUSTES PARA BANCOS ANTIGOS
+# ==========================================
+
+for tabela, coluna, tipo in [
+    ("registros", "cliente_base", "TEXT"),
+    ("registros", "ce_bri", "TEXT"),
+    ("registros", "arquivo_excel", "TEXT"),
+    ("registros", "data_cadastro", "TEXT"),
+    ("certificados", "rev", "INTEGER"),
+    ("certificados", "data_atualizacao", "TEXT"),
+]:
+    try:
+        cursor.execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {tipo}")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
+
+try:
+    cursor.execute("UPDATE registros SET cliente_base = 'BOLSA' WHERE cliente_base IS NULL OR cliente_base = ''")
+    conn.commit()
+except Exception:
+    pass
+
+# ==========================================
 # FUNÇÕES GERAIS
 # ==========================================
 
