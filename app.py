@@ -624,6 +624,99 @@ with aba2:
                                 "Esse IP-BRI já existe no banco."
                             )
 
+    # =========================
+    # PESQUISA ITEM
+    # =========================
+
+    st.divider()
+
+    st.subheader("Pesquisar item no banco")
+
+    tipo_busca = st.selectbox(
+        "Pesquisar por",
+        ["Referência / Modelo", "Código de Barras"]
+    )
+
+    termo_busca = st.text_input(
+        "Digite a referência/modelo ou código de barras"
+    )
+
+    if termo_busca:
+
+        if tipo_busca == "Referência / Modelo":
+
+            resultado_item = pd.read_sql_query("""
+            SELECT
+                c.ip_bri,
+                c.ce_bri,
+                c.produto,
+                c.data_emissao,
+                i.ordem,
+                i.marca,
+                i.modelo,
+                i.nome,
+                i.codigo
+            FROM itens i
+            INNER JOIN certificados c
+            ON c.id = i.certificado_id
+            WHERE i.modelo LIKE ?
+            ORDER BY c.ip_bri, i.ordem
+            """, conn, params=(f"%{termo_busca}%",))
+
+        else:
+
+            resultado_item = pd.read_sql_query("""
+            SELECT
+                c.ip_bri,
+                c.ce_bri,
+                c.produto,
+                c.data_emissao,
+                i.ordem,
+                i.marca,
+                i.modelo,
+                i.nome,
+                i.codigo
+            FROM itens i
+            INNER JOIN certificados c
+            ON c.id = i.certificado_id
+            WHERE i.codigo LIKE ?
+            ORDER BY c.ip_bri, i.ordem
+            """, conn, params=(f"%{termo_busca}%",))
+
+        if resultado_item.empty:
+
+            st.warning(
+                "Nenhum item encontrado."
+            )
+
+        else:
+
+            st.success(
+                "Item encontrado no banco ✅"
+            )
+
+            st.dataframe(
+                resultado_item,
+                use_container_width=True
+            )
+
+            st.download_button(
+                "Baixar resultado da pesquisa em CSV",
+                resultado_item.to_csv(
+                    index=False,
+                    sep=";"
+                ).encode(
+                    "ISO-8859-1",
+                    errors="replace"
+                ),
+                "resultado_pesquisa_item.csv",
+                "text/csv"
+            )
+
+    # =========================
+    # FILTRO POR MARCA
+    # =========================
+
     st.divider()
 
     st.subheader(
