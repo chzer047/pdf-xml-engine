@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS certificados (
     ip_bri TEXT UNIQUE,
     produto TEXT,
     ce_bri TEXT,
+    solicitante TEXT,
     data_emissao TEXT,
     data_validade TEXT,
     arquivo_pdf TEXT,
@@ -43,11 +44,12 @@ CREATE TABLE IF NOT EXISTS itens (
 
 conn.commit()
 
-try:
-    cursor.execute("ALTER TABLE certificados ADD COLUMN ce_bri TEXT")
-    conn.commit()
-except:
-    pass
+for coluna in ["ce_bri", "solicitante"]:
+    try:
+        cursor.execute(f"ALTER TABLE certificados ADD COLUMN {coluna} TEXT")
+        conn.commit()
+    except:
+        pass
 
 
 def clean(x):
@@ -103,6 +105,34 @@ def verificar_codigos_duplicados(df):
     return duplicados
 
 
+def extrair_solicitante(pdf_path):
+    doc = fitz.open(str(pdf_path))
+
+    if len(doc) == 0:
+        return None
+
+    texto = corrigir_texto(doc[0].get_text())
+
+    match = re.search(
+        r"Solicitante:\s*(.+?)(?=\n\s*(R\s|RUA|AV|AVENIDA|ALAMEDA|RODOVIA|ESTRADA|CEP|Referência Normativa|Referencia Normativa|Fabricante:|Código da empresa:))",
+        texto,
+        flags=re.IGNORECASE | re.DOTALL
+    )
+
+    if not match:
+        return None
+
+    solicitante = clean(match.group(1))
+
+    solicitante = re.split(
+        r"\b(RUA|AVENIDA|ALAMEDA|RODOVIA|ESTRADA|CEP)\b",
+        solicitante,
+        flags=re.IGNORECASE
+    )[0]
+
+    return clean(solicitante)
+
+
 def extrair_dados_certificado(pdf_path):
     doc = fitz.open(str(pdf_path))
 
@@ -115,6 +145,7 @@ def extrair_dados_certificado(pdf_path):
     ip_bri = None
     produto = None
     ce_bri = None
+    solicitante = None
     data_emissao = None
     data_validade = None
 
@@ -148,10 +179,13 @@ def extrair_dados_certificado(pdf_path):
     if manutencao_match:
         data_validade = manutencao_match.group(1)
 
+    solicitante = extrair_solicitante(pdf_path)
+
     return {
         "ip_bri": ip_bri,
         "produto": produto,
         "ce_bri": ce_bri,
+        "solicitante": solicitante,
         "data_emissao": data_emissao,
         "data_validade": data_validade
     }
@@ -173,7 +207,6 @@ def parse_pdf(pdf_path):
                         continue
 
                     ordem = int(ordem)
-
                     marca = clean(corrigir_texto(row[2]))
                     modelo = clean(corrigir_texto(row[3]))
                     nome = clean(corrigir_texto(row[4]))
@@ -296,8 +329,13 @@ with aba2:
             col1.metric("IP-BRI", dados_certificado["ip_bri"] or "Não encontrado")
             col2.metric("CE-BRI", dados_certificado["ce_bri"] or "Não encontrado")
             col3.metric("Produto", dados_certificado["produto"] or "Não encontrado")
-            col4.metric("Data Emissão", dados_certificado["data_emissao"] or "Não encontrado")
+            col4.metric("Emissão", dados_certificado["data_emissao"] or "Não encontrado")
             col5.metric("Próxima Manutenção", dados_certificado["data_validade"] or "Não encontrado")
+
+            st.text_input(
+                "Solicitante",
+                dados_certificado["solicitante"] or "Não encontrado"
+            )
 
             if rows:
                 df_preview = pd.DataFrame(
@@ -324,16 +362,18 @@ with aba2:
                                 ip_bri,
                                 produto,
                                 ce_bri,
+                                solicitante,
                                 data_emissao,
                                 data_validade,
                                 arquivo_pdf,
                                 data_cadastro
                             )
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                             """, (
                                 dados_certificado["ip_bri"],
                                 dados_certificado["produto"],
                                 dados_certificado["ce_bri"],
+                                dados_certificado["solicitante"],
                                 dados_certificado["data_emissao"],
                                 dados_certificado["data_validade"],
                                 banco_file.name,
@@ -375,13 +415,14 @@ with aba2:
 
     st.subheader("Consultar Certificados")
 
-    busca = st.text_input("Buscar por IP-BRI ou CE-BRI")
+    busca = st.text_input("Buscar por IP-BRI, CE-BRI ou Solicitante")
 
     query = """
     SELECT
         id,
         ip_bri,
         ce_bri,
+        solicitante,
         produto,
         data_emissao,
         data_validade,
@@ -393,8 +434,12 @@ with aba2:
     params = ()
 
     if busca:
-        query += " WHERE ip_bri LIKE ? OR ce_bri LIKE ?"
-        params = (f"%{busca}%", f"%{busca}%")
+        query += """
+        WHERE ip_bri LIKE ?
+        OR ce_bri LIKE ?
+        OR solicitante LIKE ?
+        """
+        params = (f"%{busca}%", f"%{busca}%", f"%{busca}%")
 
     certificados = pd.read_sql_query(query, conn, params=params)
 
@@ -414,6 +459,11 @@ with aba2:
         ce_bri_selecionado = certificados.loc[
             certificados["id"] == cert_id,
             "ce_bri"
+        ].values[0]
+
+        solicitante_selecionado = certificados.loc[
+            certificados["id"] == cert_id,
+            "solicitante"
         ].values[0]
 
         itens = pd.read_sql_query("""
@@ -440,6 +490,7 @@ with aba2:
 
                 itens_marca.insert(0, "ip_bri", ip_bri_selecionado)
                 itens_marca.insert(1, "ce_bri", ce_bri_selecionado)
+                itens_marca.insert(2, "solicitante", solicitante_selecionado)
 
                 st.markdown(f"### Marca: {marca}")
 
@@ -472,6 +523,7 @@ with aba2:
         SELECT
             c.ip_bri,
             c.ce_bri,
+            c.solicitante,
             c.produto,
             c.data_emissao,
             c.data_validade,
