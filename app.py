@@ -213,11 +213,11 @@ def escape_xml(texto):
 
 
 def verificar_codigos_duplicados(df):
-    if df is None or df.empty or "CODIGO" not in df.columns:
-        return pd.DataFrame()
-
     duplicados = df[
-        df.duplicated(subset=["CODIGO"], keep=False)
+        df.duplicated(
+            subset=["CODIGO"],
+            keep=False
+        )
     ].copy()
 
     if not duplicados.empty:
@@ -763,7 +763,7 @@ def salvar_ou_atualizar_certificado(
                 nome,
                 codigo
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?)
             """, (
                 certificado_id,
                 r[0],
@@ -823,6 +823,7 @@ def salvar_ou_atualizar_certificado(
         SET
             produto = ?,
             ce_bri = ?,
+            familia = ?,
             rev = ?,
             data_emissao = ?,
             arquivo_pdf = ?,
@@ -1124,7 +1125,7 @@ def salvar_registros_no_banco(banco_registros, arquivo_nome):
             arquivo_excel,
             data_cadastro
         )
-        VALUES (?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
             cliente_base,
             r.get("FABRICA", ""),
