@@ -15,6 +15,8 @@ from ftfy import fix_text
 import sqlite3
 from datetime import datetime
 from io import BytesIO
+from zoneinfo import ZoneInfo
+from io import BytesIO
 from openpyxl import load_workbook
 
 # ==========================================
@@ -1179,6 +1181,91 @@ def buscar_registro_por_certificado(ce_bri, familia):
     """, conn, params=(ce_bri, str(int(familia))))
 
 
+def gerar_backup_geral_zip():
+    buffer = BytesIO()
+
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zipf:
+        data_hora = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+        if Path(DB_PATH).exists():
+            zipf.write(DB_PATH, f"backup_db/certificados_{data_hora}.db")
+
+        try:
+            banco_completo = exportar_todos_itens()
+            zipf.writestr(
+                f"csv/banco_completo_{data_hora}.csv",
+                banco_completo.to_csv(index=False, sep=";").encode("ISO-8859-1", errors="replace")
+            )
+        except Exception:
+            pass
+
+        try:
+            registros = exportar_registros_banco()
+            zipf.writestr(
+                f"csv/registros_{data_hora}.csv",
+                registros.to_csv(index=False, sep=";").encode("ISO-8859-1", errors="replace")
+            )
+        except Exception:
+            pass
+
+        try:
+            certificados = pd.read_sql_query("SELECT * FROM certificados ORDER BY ip_bri", conn)
+            zipf.writestr(
+                f"csv/certificados_{data_hora}.csv",
+                certificados.to_csv(index=False, sep=";").encode("ISO-8859-1", errors="replace")
+            )
+        except Exception:
+            pass
+
+        try:
+            itens = pd.read_sql_query("SELECT * FROM itens ORDER BY certificado_id, ordem", conn)
+            zipf.writestr(
+                f"csv/itens_puros_{data_hora}.csv",
+                itens.to_csv(index=False, sep=";").encode("ISO-8859-1", errors="replace")
+            )
+        except Exception:
+            pass
+
+        try:
+            historico = pd.read_sql_query("SELECT * FROM historico_alteracoes ORDER BY id DESC", conn)
+            zipf.writestr(
+                f"csv/historico_{data_hora}.csv",
+                historico.to_csv(index=False, sep=";").encode("ISO-8859-1", errors="replace")
+            )
+        except Exception:
+            pass
+
+        try:
+            resumo = f"""BACKUP GERAL C XML BR ENGINE
+Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}
+
+Arquivos incluídos:
+- certificados.db
+- banco_completo.csv
+- registros.csv
+- certificados.csv
+- itens_puros.csv
+- historico.csv
+"""
+            zipf.writestr("LEIA-ME.txt", resumo.encode("ISO-8859-1", errors="replace"))
+        except Exception:
+            pass
+
+    buffer.seek(0)
+    return buffer
+
+
+
+def aviso_backup_diario():
+    try:
+        hora_sp = datetime.now(ZoneInfo("America/Sao_Paulo")).hour
+        if hora_sp >= 18:
+            st.sidebar.error("⚠️ Faça o backup geral antes de sair. O Streamlit pode reiniciar e apagar os dados.")
+    except Exception:
+        pass
+
+
+
 def atualizar_familias_certificados():
     try:
         garantir_estrutura_banco()
@@ -1389,6 +1476,20 @@ def preencher_excel_confirmacao(uploaded_file):
 # ==========================================
 # TABS
 # ==========================================
+
+aviso_backup_diario()
+
+try:
+    st.sidebar.header("Backup Geral")
+    st.sidebar.download_button(
+        "⬇️ BAIXAR BACKUP GERAL ZIP",
+        gerar_backup_geral_zip(),
+        "backup_geral_c_xml_br_engine.zip",
+        "application/zip",
+        key="backup_geral_sidebar"
+    )
+except Exception as e:
+    st.sidebar.warning(f"Backup geral indisponível: {e}")
 
 aba1, aba2, aba3, aba4, aba5 = st.tabs([
     "PDF → XML",
@@ -2203,10 +2304,10 @@ with aba5:
     )
 
     arquivo_confirmacao = st.file_uploader(
-    "Envie o Excel de confirmação",
-    type=["xlsx", "xlsm", "xls"],
-    key="excel_confirmacao"
-)
+        "Envie o Excel de confirmação",
+        type=["xlsx", "xlsm"],
+        key="excel_confirmacao"
+    )
 
     if arquivo_confirmacao:
         try:
