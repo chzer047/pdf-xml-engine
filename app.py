@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS certificados (
     ip_bri TEXT UNIQUE,
     produto TEXT,
     ce_bri TEXT,
+    familia TEXT,
     rev INTEGER,
     data_emissao TEXT,
     arquivo_pdf TEXT,
@@ -113,6 +114,7 @@ for tabela, coluna, tipo in [
     ("registros", "data_cadastro", "TEXT"),
     ("certificados", "produto", "TEXT"),
     ("certificados", "ce_bri", "TEXT"),
+    ("certificados", "familia", "TEXT"),
     ("certificados", "rev", "INTEGER"),
     ("certificados", "data_emissao", "TEXT"),
     ("certificados", "arquivo_pdf", "TEXT"),
@@ -133,6 +135,16 @@ for tabela, coluna, tipo in [
 
 try:
     cursor.execute("UPDATE registros SET cliente_base = 'BOLSA' WHERE cliente_base IS NULL OR cliente_base = ''")
+    conn.commit()
+except Exception:
+    pass
+
+try:
+    certificados_sem_familia = cursor.execute("SELECT id, ip_bri FROM certificados WHERE familia IS NULL OR familia = ''").fetchall()
+    for cert_id, ip_bri_atual in certificados_sem_familia:
+        fam = extrair_familia_ip_bri(ip_bri_atual) if 'extrair_familia_ip_bri' in globals() else None
+        if fam:
+            cursor.execute("UPDATE certificados SET familia = ? WHERE id = ?", (fam, cert_id))
     conn.commit()
 except Exception:
     pass
@@ -590,6 +602,7 @@ def garantir_estrutura_banco():
         ("itens", "codigo", "TEXT"),
         ("certificados", "produto", "TEXT"),
         ("certificados", "ce_bri", "TEXT"),
+        ("certificados", "familia", "TEXT"),
         ("certificados", "rev", "INTEGER"),
         ("certificados", "data_emissao", "TEXT"),
         ("certificados", "arquivo_pdf", "TEXT"),
@@ -716,17 +729,19 @@ def salvar_ou_atualizar_certificado(
             ip_bri,
             produto,
             ce_bri,
+            familia,
             rev,
             data_emissao,
             arquivo_pdf,
             data_cadastro,
             data_atualizacao
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             ip_bri,
             dados_certificado["produto"],
             dados_certificado["ce_bri"],
+            dados_certificado.get("familia"),
             rev_nova,
             dados_certificado["data_emissao"],
             nome_arquivo,
@@ -816,6 +831,7 @@ def salvar_ou_atualizar_certificado(
         """, (
             dados_certificado["produto"],
             dados_certificado["ce_bri"],
+            dados_certificado.get("familia"),
             rev_nova,
             dados_certificado["data_emissao"],
             nome_arquivo,
@@ -873,6 +889,7 @@ def salvar_ou_atualizar_certificado(
     SET
         produto = ?,
         ce_bri = ?,
+        familia = ?,
         rev = ?,
         data_emissao = ?,
         arquivo_pdf = ?,
@@ -881,6 +898,7 @@ def salvar_ou_atualizar_certificado(
     """, (
         dados_certificado["produto"],
         dados_certificado["ce_bri"],
+        dados_certificado.get("familia"),
         rev_nova,
         dados_certificado["data_emissao"],
         nome_arquivo,
@@ -924,7 +942,7 @@ def exportar_todos_itens():
         c.ip_bri AS ip_bri,
         c.ce_bri AS ce_bri,
         r.registro AS registro,
-        CAST(CAST(substr(c.ip_bri, -2) AS INTEGER) AS TEXT) AS fam,
+        c.familia AS fam,
         r.fabrica AS fabrica,
         c.rev AS rev,
         c.produto AS produto,
@@ -935,7 +953,7 @@ def exportar_todos_itens():
     ON c.id = i.certificado_id
     LEFT JOIN registros r
     ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
-    AND r.familia = CAST(CAST(substr(c.ip_bri, -2) AS INTEGER) AS TEXT)
+    AND r.familia = c.familia
     ORDER BY i.marca, i.modelo, c.ip_bri, i.ordem
     """, conn)
 
@@ -1157,6 +1175,25 @@ def buscar_registro_por_certificado(ce_bri, familia):
     ORDER BY fabrica, familia, registro
     """, conn, params=(ce_bri, str(int(familia))))
 
+
+def atualizar_familias_certificados():
+    try:
+        garantir_estrutura_banco()
+    except Exception:
+        pass
+
+    try:
+        certificados = cursor.execute("SELECT id, ip_bri FROM certificados").fetchall()
+        for cert_id, ip_bri_atual in certificados:
+            fam = extrair_familia_ip_bri(ip_bri_atual)
+            if fam:
+                cursor.execute("UPDATE certificados SET familia = ? WHERE id = ?", (fam, cert_id))
+        conn.commit()
+    except Exception:
+        pass
+
+
+atualizar_familias_certificados()
 
 # ==========================================
 # TABS
@@ -1440,7 +1477,7 @@ with aba2:
             c.ip_bri AS ip_bri,
             c.ce_bri AS ce_bri,
             r.registro AS registro,
-            CAST(CAST(substr(c.ip_bri, -2) AS INTEGER) AS TEXT) AS fam,
+            c.familia AS fam,
             r.fabrica AS fabrica,
             c.rev AS rev,
             c.produto AS produto,
@@ -1451,7 +1488,7 @@ with aba2:
         ON c.id = i.certificado_id
         LEFT JOIN registros r
         ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
-        AND r.familia = CAST(CAST(substr(c.ip_bri, -2) AS INTEGER) AS TEXT)
+        AND r.familia = c.familia
         WHERE {campo} LIKE ?
         ORDER BY i.marca, i.modelo, c.ip_bri, i.ordem
         """, conn, params=(f"%{termo_busca}%",))
@@ -1486,7 +1523,7 @@ with aba2:
             c.ip_bri AS ip_bri,
             c.ce_bri AS ce_bri,
             r.registro AS registro,
-            CAST(CAST(substr(c.ip_bri, -2) AS INTEGER) AS TEXT) AS fam,
+            c.familia AS fam,
             r.fabrica AS fabrica,
             c.rev AS rev,
             c.produto AS produto,
@@ -1497,7 +1534,7 @@ with aba2:
         ON c.id = i.certificado_id
         LEFT JOIN registros r
         ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
-        AND r.familia = CAST(CAST(substr(c.ip_bri, -2) AS INTEGER) AS TEXT)
+        AND r.familia = c.familia
         WHERE i.codigo IN (
             SELECT codigo
             FROM itens
@@ -1555,7 +1592,7 @@ with aba2:
             c.ip_bri AS ip_bri,
             c.ce_bri AS ce_bri,
             r.registro AS registro,
-            CAST(CAST(substr(c.ip_bri, -2) AS INTEGER) AS TEXT) AS fam,
+            c.familia AS fam,
             r.fabrica AS fabrica,
             c.rev AS rev,
             c.produto AS produto,
@@ -1566,7 +1603,7 @@ with aba2:
         ON c.id = i.certificado_id
         LEFT JOIN registros r
         ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
-        AND r.familia = CAST(CAST(substr(c.ip_bri, -2) AS INTEGER) AS TEXT)
+        AND r.familia = c.familia
         WHERE i.marca = ?
         ORDER BY i.modelo, c.ip_bri
         """, conn, params=(marca_filtro,))
@@ -1719,7 +1756,7 @@ with aba3:
             c.ip_bri AS ip_bri,
             c.ce_bri AS ce_bri,
             r.registro AS registro,
-            CAST(CAST(substr(c.ip_bri, -2) AS INTEGER) AS TEXT) AS fam,
+            c.familia AS fam,
             r.fabrica AS fabrica,
             c.rev AS rev,
             c.produto AS produto,
@@ -1730,7 +1767,7 @@ with aba3:
         ON c.id = i.certificado_id
         LEFT JOIN registros r
         ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
-        AND r.familia = CAST(CAST(substr(c.ip_bri, -2) AS INTEGER) AS TEXT)
+        AND r.familia = c.familia
         WHERE UPPER(c.ip_bri) LIKE ?
         OR REPLACE(UPPER(c.ip_bri), 'IP-BRI-', '') LIKE ?
         ORDER BY i.marca, i.modelo, i.ordem
