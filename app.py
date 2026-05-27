@@ -1,118 +1,5 @@
-import streamlit as st
-import pdfplumber
-import fitz
-import re
-import pandas as pd
-from pathlib import Path
-import zipfile
-import tempfile
-from ftfy import fix_text
-import sqlite3
-from datetime import datetime
-
-st.set_page_config(page_title="C XML BR Engine", layout="wide")
-
-# =========================
-# BANCO DE DADOS
-# =========================
-
-conn = sqlite3.connect("certificados.db", check_same_thread=False)
-cursor = conn.cursor()
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS certificados (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ip_bri TEXT UNIQUE,
-    produto TEXT,
-    fabricante TEXT,
-    data_emissao TEXT,
-    data_validade TEXT,
-    arquivo_pdf TEXT,
-    data_cadastro TEXT
-)
-""")
-
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS itens (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    certificado_id INTEGER,
-    ordem INTEGER,
-    marca TEXT,
-    modelo TEXT,
-    nome TEXT,
-    codigo TEXT,
-    FOREIGN KEY(certificado_id) REFERENCES certificados(id)
-)
-""")
-
-conn.commit()
-
-# Adiciona fabricante caso o banco antigo já exista
-try:
-    cursor.execute("ALTER TABLE certificados ADD COLUMN fabricante TEXT")
-    conn.commit()
-except sqlite3.OperationalError:
-    pass
-
-
-# =========================
-# FUNÇÕES
-# =========================
-
-def clean(x):
-    if x is None:
-        return ""
-    return re.sub(r"\s+", " ", str(x).replace("\n", " ")).strip()
-
-
-def corrigir_texto(texto):
-    if texto is None:
-        return ""
-    return fix_text(str(texto))
-
-
-def extrair_codigo_unico(codigo_raw):
-    if not codigo_raw:
-        return None
-
-    codigo = re.split(r"[\/\n]", codigo_raw)[0]
-    codigo = re.sub(r"\D", "", codigo)
-
-    if not codigo or not codigo.isdigit():
-        return None
-
-    if len(codigo) < 8 or len(codigo) > 14:
-        return None
-
-    return codigo
-
-
-def limitar_nome(nome):
-    nome = clean(nome)
-
-    if len(nome) > 200:
-        nome = nome.replace("PRODUZIDO", "PROD.")
-        nome = nome.replace("INDICATIVO", "IND.")
-        nome = nome.replace("RESTRITIVO", "REST.")
-        nome = nome[:200]
-
-    return nome
-
-
-def escape_xml(texto):
-    return str(texto).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-
-def verificar_codigos_duplicados(df):
-    duplicados = df[df.duplicated(subset=["CODIGO"], keep=False)].copy()
-
-    if not duplicados.empty:
-        duplicados = duplicados.sort_values(by="CODIGO")
-
-    return duplicados
-
-
 def extrair_fabricante_primeira_pagina(pdf_path):
+
     doc = fitz.open(str(pdf_path))
 
     if len(doc) == 0:
@@ -121,451 +8,69 @@ def extrair_fabricante_primeira_pagina(pdf_path):
     texto = doc[0].get_text()
     texto = corrigir_texto(texto)
 
-    match = re.search(
-        r"Fabricante:\s*(.+?)(?=\n\s*(Importador|CNPJ|Produto|Modelo|Marca|Norma|Data|Página|Numero|Número|$))",
-        texto,
-        flags=re.IGNORECASE | re.DOTALL
-    )
-
-    if match:
-        fabricante = clean(match.group(1))
-        return fabricante
-
-    return None
-
-
-def extrair_dados_certificado(pdf_path):
-    doc = fitz.open(str(pdf_path))
-    texto = ""
-
-    for page in doc:
-        texto += page.get_text() + "\n"
-
-    texto = corrigir_texto(texto)
-
-    ip_bri = None
-    produto = None
-    data_emissao = None
-    data_validade = None
-
-    ip_match = re.search(r"IP-BRI-\d+\/\d+-\d+", texto)
-
-    if ip_match:
-        ip_bri = ip_match.group(0)
-
-    produto_match = re.search(r"Produto:\s*(.+)", texto)
-
-    if produto_match:
-        produto = clean(produto_match.group(1))
-
-    datas = re.findall(r"\d{2}/\d{2}/\d{4}", texto)
-
-    if len(datas) >= 2:
-        data_emissao = datas[0]
-        data_validade = datas[1]
-
-    fabricante = extrair_fabricante_primeira_pagina(pdf_path)
-
-    return {
-        "ip_bri": ip_bri,
-        "produto": produto,
-        "fabricante": fabricante,
-        "data_emissao": data_emissao,
-        "data_validade": data_validade
-    }
-
-
-def parse_pdf(pdf_path):
-    rows = []
-
-    with pdfplumber.open(str(pdf_path)) as pdf:
-        for page in pdf.pages:
-            for table in page.extract_tables() or []:
-                for row in table:
-                    if not row or len(row) < 6:
-                        continue
-
-                    ordem = clean(row[1])
-
-                    if not re.fullmatch(r"\d{3}", ordem):
-                        continue
-
-                    ordem = int(ordem)
-
-                    marca = clean(corrigir_texto(row[2]))
-                    modelo = clean(corrigir_texto(row[3]))
-                    nome = clean(corrigir_texto(row[4]))
-
-                    codigo_raw = clean(corrigir_texto(row[5]))
-                    codigo = extrair_codigo_unico(codigo_raw)
-
-                    if not codigo:
-                        continue
-
-                    rows.append([
-                        ordem,
-                        marca,
-                        modelo,
-                        nome,
-                        codigo
-                    ])
-
-    rows.sort(key=lambda x: x[0])
-
-    return rows
-
-
-def gerar_xml(df, sufixo):
     linhas = [
-        '<?xml version="1.0" encoding="ISO-8859-1"?>',
-        '<ArrayOfItemSolicitacao>'
+        clean(linha)
+        for linha in texto.split("\n")
+        if clean(linha)
     ]
 
-    for _, r in df.iterrows():
-        modelo = r["MODELO"].rstrip(".,") + sufixo
+    fabricante_linhas = []
+    capturando = False
 
-        linhas.append(f"""
-<ItemSolicitacao>
-<Marca>{escape_xml(r['MARCA'])}</Marca>
-<Modelo>{escape_xml(modelo)}</Modelo>
-<Nome>{escape_xml(limitar_nome(r['NOME']))}</Nome>
-<CodigosBarras>
-<Codigo>{r['CODIGO']}</Codigo>
-</CodigosBarras>
-</ItemSolicitacao>
-""")
+    parar_em = [
+        "IMPORTADOR",
+        "CNPJ",
+        "PRODUTO",
+        "MARCA",
+        "MODELO",
+        "NORMA",
+        "DATA",
+        "PÁGINA",
+        "PAGINA",
+        "CERTIFICADO",
+        "NÚMERO",
+        "NUMERO",
+        "ETAPA",
+        "IP-BRI"
+    ]
 
-    linhas.append("</ArrayOfItemSolicitacao>")
+    for linha in linhas:
 
-    return "\n".join(linhas)
+        linha_upper = linha.upper()
 
+        # INICIA CAPTURA
+        if "FABRICANTE:" in linha_upper:
 
-# =========================
-# INTERFACE
-# =========================
+            capturando = True
 
-aba1, aba2 = st.tabs([
-    "PDF → XML",
-    "Banco de Certificados"
-])
+            conteudo = linha.split(":", 1)[1].strip()
 
+            if conteudo:
+                fabricante_linhas.append(conteudo)
 
-# =========================
-# ABA 1 - XML ORIGINAL
-# =========================
+            continue
 
-with aba1:
-    st.title("C XML BR Engine - PDF → XML")
+        # CONTINUA CAPTURANDO
+        if capturando:
 
-    uploaded_file = st.file_uploader(
-        "Envie o PDF",
-        type="pdf",
-        key="xml_pdf"
+            # PARA SE ENCONTRAR OUTRO CAMPO
+            if any(
+                linha_upper.startswith(p)
+                for p in parar_em
+            ):
+                break
+
+            fabricante_linhas.append(linha)
+
+    fabricante = clean(
+        " ".join(fabricante_linhas)
     )
 
-    if uploaded_file:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            pdf_path = Path(tmpdir) / uploaded_file.name
-            pdf_path.write_bytes(uploaded_file.read())
+    # REMOVE ESPAÇOS DUPLOS
+    fabricante = re.sub(
+        r"\s+",
+        " ",
+        fabricante
+    ).strip()
 
-            rows = parse_pdf(pdf_path)
-
-            if not rows:
-                st.error("Nenhum item válido encontrado")
-                st.stop()
-
-            df = pd.DataFrame(
-                rows,
-                columns=[
-                    "ORDEM",
-                    "MARCA",
-                    "MODELO",
-                    "NOME",
-                    "CODIGO"
-                ]
-            )
-
-            st.success("Itens extraídos com sucesso ✅")
-            st.dataframe(df)
-
-            xml_comma = gerar_xml(df, ",")
-            xml_dot = gerar_xml(df, ".")
-
-            zip_path = Path(tmpdir) / "resultado_xml.zip"
-
-            with zipfile.ZipFile(zip_path, "w") as zipf:
-                zipf.writestr(
-                    "xml_virgula.xml",
-                    xml_comma.encode(
-                        "ISO-8859-1",
-                        errors="replace"
-                    )
-                )
-
-                zipf.writestr(
-                    "xml_ponto.xml",
-                    xml_dot.encode(
-                        "ISO-8859-1",
-                        errors="replace"
-                    )
-                )
-
-            with open(zip_path, "rb") as f:
-                st.download_button(
-                    "Baixar XMLs",
-                    f,
-                    "resultado_xml.zip"
-                )
-
-
-# =========================
-# ABA 2 - BANCO
-# =========================
-
-with aba2:
-    st.title("Banco de Certificados")
-
-    banco_file = st.file_uploader(
-        "Envie um certificado PDF",
-        type="pdf",
-        key="banco_pdf"
-    )
-
-    if banco_file:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            pdf_path = Path(tmpdir) / banco_file.name
-            pdf_path.write_bytes(banco_file.read())
-
-            dados_certificado = extrair_dados_certificado(pdf_path)
-            rows = parse_pdf(pdf_path)
-
-            st.subheader("Dados do Certificado")
-
-            col1, col2, col3, col4 = st.columns(4)
-
-            col1.metric("IP-BRI", dados_certificado["ip_bri"] or "Não encontrado")
-            col2.metric("Produto", dados_certificado["produto"] or "Não encontrado")
-            col3.metric("Emissão", dados_certificado["data_emissao"] or "Não encontrado")
-            col4.metric("Validade", dados_certificado["data_validade"] or "Não encontrado")
-
-            st.text_area(
-                "Fabricante",
-                dados_certificado["fabricante"] or "Não encontrado",
-                height=90
-            )
-
-            if rows:
-                df_preview = pd.DataFrame(
-                    rows,
-                    columns=[
-                        "ORDEM",
-                        "MARCA",
-                        "MODELO",
-                        "NOME",
-                        "CODIGO"
-                    ]
-                )
-
-                st.subheader("Itens encontrados")
-                st.dataframe(df_preview, use_container_width=True)
-
-                duplicados = verificar_codigos_duplicados(df_preview)
-
-                if not duplicados.empty:
-                    st.warning(
-                        "Foram encontrados códigos de barras duplicados neste certificado."
-                    )
-
-                    st.dataframe(
-                        duplicados,
-                        use_container_width=True
-                    )
-
-                if st.button("Salvar no banco"):
-                    if not dados_certificado["ip_bri"]:
-                        st.error("IP-BRI não encontrado.")
-                    else:
-                        try:
-                            cursor.execute("""
-                            INSERT INTO certificados (
-                                ip_bri,
-                                produto,
-                                fabricante,
-                                data_emissao,
-                                data_validade,
-                                arquivo_pdf,
-                                data_cadastro
-                            )
-                            VALUES (?, ?, ?, ?, ?, ?, ?)
-                            """, (
-                                dados_certificado["ip_bri"],
-                                dados_certificado["produto"],
-                                dados_certificado["fabricante"],
-                                dados_certificado["data_emissao"],
-                                dados_certificado["data_validade"],
-                                banco_file.name,
-                                datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-                            ))
-
-                            conn.commit()
-                            certificado_id = cursor.lastrowid
-
-                            for r in rows:
-                                cursor.execute("""
-                                INSERT INTO itens (
-                                    certificado_id,
-                                    ordem,
-                                    marca,
-                                    modelo,
-                                    nome,
-                                    codigo
-                                )
-                                VALUES (?, ?, ?, ?, ?, ?)
-                                """, (
-                                    certificado_id,
-                                    r[0],
-                                    r[1],
-                                    r[2],
-                                    r[3],
-                                    r[4]
-                                ))
-
-                            conn.commit()
-
-                            st.success("Certificado salvo com sucesso ✅")
-
-                        except sqlite3.IntegrityError:
-                            st.error("Esse IP-BRI já existe no banco.")
-
-            else:
-                st.warning("Nenhum item válido encontrado nesse PDF.")
-
-    st.divider()
-
-    st.subheader("Consultar Certificados")
-
-    busca = st.text_input("Buscar IP-BRI")
-
-    query = """
-    SELECT
-        id,
-        ip_bri,
-        produto,
-        fabricante,
-        data_emissao,
-        data_validade
-    FROM certificados
-    """
-
-    params = ()
-
-    if busca:
-        query += " WHERE ip_bri LIKE ?"
-        params = (f"%{busca}%",)
-
-    certificados = pd.read_sql_query(
-        query,
-        conn,
-        params=params
-    )
-
-    st.dataframe(certificados, use_container_width=True)
-
-    if not certificados.empty:
-        cert_id = st.selectbox(
-            "Selecionar certificado",
-            certificados["id"]
-        )
-
-        ip_bri_selecionado = certificados.loc[
-            certificados["id"] == cert_id, "ip_bri"
-        ].values[0]
-
-        itens = pd.read_sql_query("""
-        SELECT
-            ordem,
-            marca,
-            modelo,
-            nome,
-            codigo
-        FROM itens
-        WHERE certificado_id = ?
-        ORDER BY marca, ordem
-        """, conn, params=(cert_id,))
-
-        st.subheader("Itens separados por marca")
-
-        if itens.empty:
-            st.warning("Nenhum item encontrado para este certificado.")
-        else:
-            marcas = sorted(
-                itens["marca"].dropna().unique()
-            )
-
-            for marca in marcas:
-                itens_marca = itens[
-                    itens["marca"] == marca
-                ].copy()
-
-                itens_marca.insert(
-                    0,
-                    "ip_bri",
-                    ip_bri_selecionado
-                )
-
-                st.markdown(f"### Marca: {marca}")
-
-                st.dataframe(
-                    itens_marca,
-                    use_container_width=True
-                )
-
-    st.divider()
-
-    st.subheader("Filtro geral por Marca")
-
-    marcas_banco = pd.read_sql_query("""
-    SELECT DISTINCT marca
-    FROM itens
-    WHERE marca IS NOT NULL AND marca != ''
-    ORDER BY marca
-    """, conn)
-
-    if marcas_banco.empty:
-        st.info("Nenhuma marca cadastrada no banco ainda.")
-    else:
-        marca_filtro = st.selectbox(
-            "Selecione uma marca para buscar em todos os IP-BRI",
-            marcas_banco["marca"].tolist()
-        )
-
-        resultado_marca = pd.read_sql_query("""
-        SELECT
-            c.ip_bri,
-            c.produto,
-            c.fabricante,
-            c.data_emissao,
-            c.data_validade,
-            i.ordem,
-            i.marca,
-            i.modelo,
-            i.nome,
-            i.codigo
-        FROM itens i
-        INNER JOIN certificados c ON c.id = i.certificado_id
-        WHERE i.marca = ?
-        ORDER BY c.ip_bri, i.ordem
-        """, conn, params=(marca_filtro,))
-
-        st.dataframe(resultado_marca, use_container_width=True)
-
-        if not resultado_marca.empty:
-            st.download_button(
-                "Baixar resultado da marca em CSV",
-                resultado_marca.to_csv(index=False, sep=";").encode(
-                    "ISO-8859-1",
-                    errors="replace"
-                ),
-                f"marca_{marca_filtro}.csv",
-                "text/csv"
-            )
+    return fabricante or None
