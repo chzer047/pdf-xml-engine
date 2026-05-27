@@ -539,6 +539,48 @@ def comparar_itens(
 
 
 def garantir_estrutura_banco():
+    # Garante que todas as tabelas principais existam
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS certificados (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ip_bri TEXT UNIQUE,
+        produto TEXT,
+        ce_bri TEXT,
+        rev INTEGER,
+        data_emissao TEXT,
+        arquivo_pdf TEXT,
+        data_cadastro TEXT,
+        data_atualizacao TEXT
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS itens (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        certificado_id INTEGER,
+        ordem INTEGER,
+        marca TEXT,
+        modelo TEXT,
+        nome TEXT,
+        codigo TEXT
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS registros (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cliente_base TEXT,
+        fabrica TEXT,
+        ce_bri TEXT,
+        familia TEXT,
+        registro TEXT,
+        arquivo_excel TEXT,
+        data_cadastro TEXT
+    )
+    """)
+
+    conn.commit()
+
     ajustes = [
         ("itens", "certificado_id", "INTEGER"),
         ("itens", "ordem", "INTEGER"),
@@ -546,8 +588,12 @@ def garantir_estrutura_banco():
         ("itens", "modelo", "TEXT"),
         ("itens", "nome", "TEXT"),
         ("itens", "codigo", "TEXT"),
+        ("certificados", "produto", "TEXT"),
         ("certificados", "ce_bri", "TEXT"),
         ("certificados", "rev", "INTEGER"),
+        ("certificados", "data_emissao", "TEXT"),
+        ("certificados", "arquivo_pdf", "TEXT"),
+        ("certificados", "data_cadastro", "TEXT"),
         ("certificados", "data_atualizacao", "TEXT"),
         ("registros", "cliente_base", "TEXT"),
         ("registros", "ce_bri", "TEXT"),
@@ -571,6 +617,80 @@ def garantir_estrutura_banco():
     except Exception:
         pass
 
+
+def reparar_tabela_itens_se_necessario():
+    obrigatorias = {
+        "id",
+        "certificado_id",
+        "ordem",
+        "marca",
+        "modelo",
+        "nome",
+        "codigo"
+    }
+
+    try:
+        info = cursor.execute("PRAGMA table_info(itens)").fetchall()
+        existentes = {linha[1] for linha in info}
+    except Exception:
+        existentes = set()
+
+    if obrigatorias.issubset(existentes):
+        return
+
+    # Cria uma tabela nova correta e tenta preservar o que for possível
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS itens_corrigida (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        certificado_id INTEGER,
+        ordem INTEGER,
+        marca TEXT,
+        modelo TEXT,
+        nome TEXT,
+        codigo TEXT
+    )
+    """)
+
+    colunas_comuns = [c for c in ["id", "certificado_id", "ordem", "marca", "modelo", "nome", "codigo"] if c in existentes]
+
+    if colunas_comuns:
+        cols = ", ".join(colunas_comuns)
+        try:
+            cursor.execute(f"INSERT OR IGNORE INTO itens_corrigida ({cols}) SELECT {cols} FROM itens")
+        except Exception:
+            pass
+
+    try:
+        cursor.execute("DROP TABLE itens")
+    except Exception:
+        pass
+
+    cursor.execute("ALTER TABLE itens_corrigida RENAME TO itens")
+    conn.commit()
+
+
+def inserir_item_seguro(certificado_id, r):
+    garantir_estrutura_banco()
+    reparar_tabela_itens_se_necessario()
+
+    cursor.execute("""
+    INSERT INTO itens (
+        certificado_id,
+        ordem,
+        marca,
+        modelo,
+        nome,
+        codigo
+    )
+    VALUES (?, ?, ?, ?, ?, ?)
+    """, (
+        certificado_id,
+        r[0],
+        r[1],
+        r[2],
+        r[3],
+        r[4]
+    ))
 
 
 def salvar_ou_atualizar_certificado(
@@ -705,24 +825,7 @@ def salvar_ou_atualizar_certificado(
         ))
 
         for r in rows:
-            cursor.execute("""
-            INSERT INTO itens (
-                certificado_id,
-                ordem,
-                marca,
-                modelo,
-                nome,
-                codigo
-            )
-            VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                certificado_id,
-                r[0],
-                r[1],
-                r[2],
-                r[3],
-                r[4]
-            ))
+            inserir_item_seguro(certificado_id, r)
 
         conn.commit()
 
@@ -787,24 +890,7 @@ def salvar_ou_atualizar_certificado(
     ))
 
     for r in rows:
-        cursor.execute("""
-        INSERT INTO itens (
-            certificado_id,
-            ordem,
-            marca,
-            modelo,
-            nome,
-            codigo
-        )
-        VALUES (?, ?, ?, ?, ?, ?)
-        """, (
-            certificado_id,
-            r[0],
-            r[1],
-            r[2],
-            r[3],
-            r[4]
-        ))
+        inserir_item_seguro(certificado_id, r)
 
     conn.commit()
 
