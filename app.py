@@ -685,9 +685,10 @@ def exportar_todos_itens():
 # TABS
 # ==========================================
 
-aba1, aba2 = st.tabs([
+aba1, aba2, aba3 = st.tabs([
     "PDF → XML",
-    "Banco de Certificados"
+    "Banco de Certificados",
+    "Consultar IP-BRI"
 ])
 
 # ==========================================
@@ -1008,3 +1009,76 @@ with aba2:
                                 f"Antes: {row['valor_antigo']}\n\n"
                                 f"Depois: {row['valor_novo']}"
                             )
+# ==========================================
+# ABA 3 - CONSULTAR IP-BRI
+# ==========================================
+
+with aba3:
+
+    st.title("Consultar IP-BRI")
+
+    busca_ip = st.text_input("Digite o IP-BRI que deseja consultar")
+
+    if busca_ip:
+
+        certificado = pd.read_sql_query("""
+        SELECT
+            id,
+            ip_bri,
+            ce_bri,
+            rev,
+            produto,
+            data_emissao,
+            arquivo_pdf,
+            data_cadastro,
+            data_atualizacao
+        FROM certificados
+        WHERE ip_bri LIKE ?
+        """, conn, params=(f"%{busca_ip}%",))
+
+        if certificado.empty:
+
+            st.warning("Nenhum IP-BRI encontrado.")
+
+        else:
+
+            st.success("IP-BRI encontrado ✅")
+
+            st.subheader("Dados do Certificado")
+            st.dataframe(certificado, use_container_width=True)
+
+            cert_id = certificado.iloc[0]["id"]
+
+            itens_ip = pd.read_sql_query("""
+            SELECT
+                i.marca,
+                i.modelo,
+                i.nome,
+                i.codigo,
+                c.ip_bri,
+                c.ce_bri,
+                c.rev,
+                c.produto,
+                c.data_emissao,
+                i.ordem
+            FROM itens i
+            INNER JOIN certificados c
+            ON c.id = i.certificado_id
+            WHERE c.id = ?
+            ORDER BY i.marca, i.modelo, i.ordem
+            """, conn, params=(cert_id,))
+
+            st.subheader("Itens deste IP-BRI")
+            st.dataframe(itens_ip, use_container_width=True)
+
+            if not itens_ip.empty:
+
+                st.download_button(
+                    "Baixar itens deste IP-BRI em CSV",
+                    itens_ip.to_csv(index=False, sep=";").encode(
+                        "ISO-8859-1",
+                        errors="replace"
+                    ),
+                    f"itens_{busca_ip.replace('/', '-')}.csv",
+                    "text/csv"
+                )
