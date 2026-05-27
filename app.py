@@ -14,6 +14,8 @@ import tempfile
 from ftfy import fix_text
 import sqlite3
 from datetime import datetime
+from io import BytesIO
+from openpyxl import load_workbook
 
 # ==========================================
 # CONFIG
@@ -1197,14 +1199,203 @@ def atualizar_familias_certificados():
 atualizar_familias_certificados()
 
 # ==========================================
+# PREENCHIMENTO DE CONFIRMAÇÃO
+# ==========================================
+
+
+def cor_rgb(cell):
+    try:
+        fill = cell.fill
+        if fill is None or fill.fill_type is None:
+            return None
+
+        color = fill.fgColor
+
+        if color is None:
+            return None
+
+        rgb = color.rgb
+
+        if not rgb:
+            return None
+
+        rgb = str(rgb).replace("#", "")
+
+        if len(rgb) == 8:
+            rgb = rgb[2:]
+
+        if len(rgb) != 6:
+            return None
+
+        return tuple(int(rgb[i:i+2], 16) for i in (0, 2, 4))
+    except Exception:
+        return None
+
+
+
+def eh_amarelo(cell):
+    rgb = cor_rgb(cell)
+    if not rgb:
+        return False
+
+    r, g, b = rgb
+    return r >= 180 and g >= 150 and b <= 140
+
+
+
+def eh_verde(cell):
+    rgb = cor_rgb(cell)
+    if not rgb:
+        return False
+
+    r, g, b = rgb
+    return g >= 120 and r <= 180 and b <= 180 and g >= r
+
+
+
+def eh_azul(cell):
+    rgb = cor_rgb(cell)
+    if not rgb:
+        return False
+
+    r, g, b = rgb
+    return b >= 120 and b > r and b >= g
+
+
+
+def normalizar_cabecalho(valor):
+    texto = clean(valor).upper()
+    texto = texto.replace("CÓDIGO", "CODIGO")
+    texto = texto.replace("COD.", "CODIGO")
+    texto = texto.replace("CÓD.", "CODIGO")
+    texto = texto.replace("IP-BRI", "IP_BRI")
+    texto = texto.replace("CE-BRI", "CE_BRI")
+    texto = texto.replace(" ", "_")
+    return texto
+
+
+
+def buscar_item_confirmacao(valor_ref):
+    ref = clean(valor_ref)
+
+    if not ref:
+        return None
+
+    resultado = pd.read_sql_query("""
+    SELECT
+        i.marca AS MARCA,
+        i.modelo AS MODELO,
+        i.nome AS NOME,
+        i.codigo AS CODIGO,
+        c.ip_bri AS IP_BRI,
+        c.ce_bri AS CE_BRI,
+        r.registro AS REGISTRO
+    FROM itens i
+    INNER JOIN certificados c
+    ON c.id = i.certificado_id
+    LEFT JOIN registros r
+    ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
+    AND r.familia = c.familia
+    WHERE i.modelo LIKE ?
+       OR i.codigo LIKE ?
+       OR i.nome LIKE ?
+       OR i.marca LIKE ?
+       OR c.ip_bri LIKE ?
+    ORDER BY c.rev DESC, c.ip_bri DESC
+    LIMIT 1
+    """, conn, params=(
+        f"%{ref}%",
+        f"%{ref}%",
+        f"%{ref}%",
+        f"%{ref}%",
+        f"%{ref}%"
+    ))
+
+    if resultado.empty:
+        return None
+
+    return resultado.iloc[0].to_dict()
+
+
+
+def descobrir_cabecalho_coluna(ws, row_idx, col_idx):
+    # Primeiro procura cabeçalho azul acima da célula amarela
+    for r in range(row_idx - 1, 0, -1):
+        cell = ws.cell(r, col_idx)
+        valor = clean(cell.value)
+
+        if valor and (eh_azul(cell) or normalizar_cabecalho(valor) in ["MARCA", "MODELO", "NOME", "CODIGO", "IP_BRI", "CE_BRI", "REGISTRO"]):
+            return normalizar_cabecalho(valor)
+
+    # Plano B: procura qualquer texto de cabeçalho acima
+    for r in range(row_idx - 1, 0, -1):
+        valor = clean(ws.cell(r, col_idx).value)
+        cab = normalizar_cabecalho(valor)
+
+        if cab in ["MARCA", "MODELO", "NOME", "CODIGO", "IP_BRI", "CE_BRI", "REGISTRO"]:
+            return cab
+
+    return ""
+
+
+
+def preencher_excel_confirmacao(uploaded_file):
+    wb = load_workbook(uploaded_file)
+
+    preenchidos = 0
+    nao_encontrados = []
+
+    for ws in wb.worksheets:
+        for row in ws.iter_rows():
+            refs = []
+
+            for cell in row:
+                if eh_verde(cell) and clean(cell.value):
+                    refs.append(clean(cell.value))
+
+            if not refs:
+                continue
+
+            item = None
+            ref_usada = None
+
+            for ref in refs:
+                item = buscar_item_confirmacao(ref)
+                if item:
+                    ref_usada = ref
+                    break
+
+            if not item:
+                nao_encontrados.extend(refs)
+                continue
+
+            for cell in row:
+                if not eh_amarelo(cell):
+                    continue
+
+                campo = descobrir_cabecalho_coluna(ws, cell.row, cell.column)
+
+                if campo in item and item[campo] is not None:
+                    cell.value = item[campo]
+                    preenchidos += 1
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    return output, preenchidos, nao_encontrados
+
+
+# ==========================================
 # TABS
 # ==========================================
 
-aba1, aba2, aba3, aba4 = st.tabs([
+aba1, aba2, aba3, aba4, aba5 = st.tabs([
     "PDF → XML",
     "Banco de Certificados",
     "Consultar IP-BRI",
-    "Registros"
+    "Registros",
+    "Preenchimento de Confirmação"
 ])
 
 # ==========================================
@@ -1997,3 +2188,47 @@ with aba4:
 
         except Exception as e:
             st.error(f"Erro ao ler Excel: {e}")
+
+
+# ==========================================
+# ABA 5 - PREENCHIMENTO DE CONFIRMAÇÃO
+# ==========================================
+
+with aba5:
+    st.title("Preenchimento de Confirmação")
+
+    st.info(
+        "Envie o Excel de confirmação. O sistema vai usar as células verdes como referência, "
+        "identificar as colunas pelo cabeçalho azul e preencher somente as células amarelas com dados do banco."
+    )
+
+    arquivo_confirmacao = st.file_uploader(
+        "Envie o Excel de confirmação",
+        type=["xlsx", "xlsm"],
+        key="excel_confirmacao"
+    )
+
+    if arquivo_confirmacao:
+        try:
+            saida_excel, total_preenchidos, nao_encontrados = preencher_excel_confirmacao(
+                arquivo_confirmacao
+            )
+
+            st.success(f"Preenchimento concluído ✅ {total_preenchidos} células preenchidas.")
+
+            if nao_encontrados:
+                st.warning("Algumas referências verdes não foram encontradas no banco.")
+                st.dataframe(
+                    pd.DataFrame({"referencia_nao_encontrada": sorted(set(nao_encontrados))}),
+                    use_container_width=True
+                )
+
+            st.download_button(
+                "Baixar Excel preenchido",
+                saida_excel,
+                "confirmacao_preenchida.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+        except Exception as e:
+            st.error(f"Erro ao preencher Excel: {e}")
