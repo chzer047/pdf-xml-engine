@@ -47,10 +47,6 @@ CREATE TABLE IF NOT EXISTS itens (
 
 conn.commit()
 
-# =========================
-# AJUSTE BANCO ANTIGO
-# =========================
-
 try:
     cursor.execute(
         "ALTER TABLE certificados ADD COLUMN fabricante TEXT"
@@ -165,38 +161,79 @@ def extrair_fabricante_primeira_pagina(pdf_path):
     if len(doc) == 0:
         return None
 
-    texto = doc[0].get_text()
+    page = doc[0]
 
-    texto = corrigir_texto(texto)
+    blocks = page.get_text("blocks")
 
-    # 🔥 BLOCO ENTRE FABRICANTE E REFERÊNCIA
-    match = re.search(
-        r"Fabricante:\s*(.*?)(?=Referência Normativa|Referencia Normativa|Última data|Ultima data|Relatório|Relatorio|Este Certificado)",
-        texto,
-        flags=re.IGNORECASE | re.DOTALL
-    )
+    candidatos = []
 
-    if not match:
+    for b in blocks:
+
+        x0, y0, x1, y1, texto, *_ = b
+
+        texto = corrigir_texto(texto)
+
+        texto_limpo = clean(texto)
+
+        if "Fabricante:" in texto_limpo:
+
+            candidatos.append(
+                (
+                    x0,
+                    y0,
+                    x1,
+                    y1,
+                    texto_limpo
+                )
+            )
+
+    if not candidatos:
         return None
 
-    fabricante = match.group(1)
+    candidatos = sorted(
+        candidatos,
+        key=lambda x: (x[1], -x[0])
+    )
 
-    # 🔥 REMOVE DATAS SOLTAS
+    bloco = candidatos[-1][4]
+
+    fabricante = bloco.split(
+        "Fabricante:",
+        1
+    )[1]
+
+    parar_em = [
+        "Referência Normativa",
+        "Referencia Normativa",
+        "Última data",
+        "Ultima data",
+        "Relatório",
+        "Relatorio",
+        "Este Certificado",
+        "Solicitante:",
+        "Código da empresa:",
+        "Etapa Atual:",
+        "Identificação do Processo:",
+        "Próxima Manutenção:",
+        "Revisão:"
+    ]
+
+    for p in parar_em:
+
+        if p in fabricante:
+
+            fabricante = fabricante.split(
+                p,
+                1
+            )[0]
+
     fabricante = re.sub(
         r"\b\d{2}/\d{2}/\d{4}\b",
         "",
         fabricante
     )
 
-    linhas = [
-        clean(linha)
-        for linha in fabricante.split("\n")
-        if clean(linha)
-    ]
-
-    fabricante = clean(
-        " ".join(linhas)
-    )
+    fabricante = clean(fabricante)
 
     return fabricante or None
 
@@ -211,6 +248,7 @@ def extrair_dados_certificado(pdf_path):
     texto = ""
 
     for page in doc:
+
         texto += page.get_text() + "\n"
 
     texto = corrigir_texto(texto)
@@ -220,7 +258,6 @@ def extrair_dados_certificado(pdf_path):
     data_emissao = None
     data_validade = None
 
-    # 🔥 IP-BRI
     ip_match = re.search(
         r"IP-BRI-\d+\/\d+-\d+",
         texto
@@ -229,7 +266,6 @@ def extrair_dados_certificado(pdf_path):
     if ip_match:
         ip_bri = ip_match.group(0)
 
-    # 🔥 PRODUTO
     produto_match = re.search(
         r"Produto:\s*(.+)",
         texto
@@ -240,7 +276,6 @@ def extrair_dados_certificado(pdf_path):
             produto_match.group(1)
         )
 
-    # 🔥 DATA EMISSÃO
     emissao_match = re.search(
         r"Data de Emissão:\s*(\d{2}/\d{2}/\d{4})",
         texto
@@ -249,10 +284,13 @@ def extrair_dados_certificado(pdf_path):
     if emissao_match:
         data_emissao = emissao_match.group(1)
 
-    # 🔥 PRÓXIMA MANUTENÇÃO
+    primeira_pagina = corrigir_texto(
+        doc[0].get_text()
+    )
+
     manutencao_match = re.search(
-        r"Próxima Manutenção/Revisão:\s*(\d{2}/\d{2}/\d{4})",
-        texto,
+        r"Próxima Manutenção(?:/Revisão)?:\s*(\d{2}/\d{2}/\d{4})",
+        primeira_pagina,
         flags=re.IGNORECASE
     )
 
@@ -377,7 +415,7 @@ aba1, aba2 = st.tabs([
 ])
 
 # =========================
-# ABA 1 - XML
+# ABA 1
 # =========================
 
 with aba1:
@@ -468,7 +506,7 @@ with aba1:
                 )
 
 # =========================
-# ABA 2 - BANCO
+# ABA 2
 # =========================
 
 with aba2:
