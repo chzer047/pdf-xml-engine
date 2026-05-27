@@ -695,12 +695,35 @@ def normalizar_familia(valor):
     if texto.endswith(".0"):
         texto = texto[:-2]
 
-    numeros = re.findall(r"\d+", texto)
+    numeros = re.findall(r"[0-9]+", texto)
 
     if numeros:
         return str(int(numeros[0]))
 
+    return ""
+
+
+
+def normalizar_registro(valor):
+    if pd.isna(valor):
+        return ""
+
+    texto = str(valor).strip()
+
+    if texto.endswith(".0"):
+        texto = texto[:-2]
+
     return texto
+
+
+
+def parece_registro(valor):
+    texto = normalizar_registro(valor)
+
+    if not texto:
+        return False
+
+    return bool(re.search(r"[0-9]+[ ]*/[ ]*[0-9]+", texto))
 
 
 
@@ -708,55 +731,86 @@ def ler_registros_aba(excel_file, aba):
     bruto = pd.read_excel(
         excel_file,
         sheet_name=aba,
-        header=None
+        header=None,
+        dtype=object
     )
 
-    linha_cabecalho = None
-    col_familia = None
-    col_registro = None
+    registros = []
 
+    # Procura TODOS os blocos com colunas FAMÍLIA e REGISTRO dentro da aba.
+    # Isso resolve planilhas com várias tabelas, linhas mescladas ou cabeçalhos repetidos.
     for i, row in bruto.iterrows():
         valores = [str(v).strip().upper() for v in row.values]
 
-        for idx, valor in enumerate(valores):
-            if "FAMILIA" in valor or "FAMÍLIA" in valor:
-                col_familia = idx
+        cols_familia = [
+            idx for idx, valor in enumerate(valores)
+            if "FAMILIA" in valor or "FAMÍLIA" in valor
+        ]
 
-            if "REGISTRO" in valor:
-                col_registro = idx
+        cols_registro = [
+            idx for idx, valor in enumerate(valores)
+            if "REGISTRO" in valor
+        ]
 
-        if col_familia is not None and col_registro is not None:
-            linha_cabecalho = i
-            break
+        if not cols_familia or not cols_registro:
+            continue
 
-    if linha_cabecalho is None:
+        for col_familia in cols_familia:
+            registros_direita = [c for c in cols_registro if c > col_familia]
+
+            if registros_direita:
+                col_registro = registros_direita[0]
+            else:
+                col_registro = min(cols_registro, key=lambda c: abs(c - col_familia))
+
+            for j in range(i + 1, len(bruto)):
+                linha_atual = [str(v).strip().upper() for v in bruto.iloc[j].values]
+                linha_texto = " ".join([v for v in linha_atual if v and v.lower() != "nan"])
+
+                # Se encontrar outro cabeçalho, encerra esse bloco e deixa o loop principal tratar o próximo.
+                if ("FAMILIA" in linha_texto or "FAMÍLIA" in linha_texto) and "REGISTRO" in linha_texto:
+                    break
+
+                familia_raw = bruto.iat[j, col_familia] if col_familia < bruto.shape[1] else None
+                registro_raw = bruto.iat[j, col_registro] if col_registro < bruto.shape[1] else None
+
+                familia = normalizar_familia(familia_raw)
+                registro = normalizar_registro(registro_raw)
+
+                if familia and registro and parece_registro(registro):
+                    registros.append({
+                        "FAMILIA": familia,
+                        "REGISTRO": registro,
+                        "FABRICA": aba
+                    })
+
+    # Plano B: varre a planilha inteira procurando família numérica com registro logo ao lado.
+    if not registros:
+        for i, row in bruto.iterrows():
+            for col in range(bruto.shape[1] - 1):
+                familia = normalizar_familia(bruto.iat[i, col])
+                registro = normalizar_registro(bruto.iat[i, col + 1])
+
+                if familia and registro and parece_registro(registro):
+                    registros.append({
+                        "FAMILIA": familia,
+                        "REGISTRO": registro,
+                        "FABRICA": aba
+                    })
+
+    if not registros:
         return None
 
-    dados = bruto.iloc[
-        linha_cabecalho + 1:,
-        [col_familia, col_registro]
-    ].copy()
+    dados = pd.DataFrame(registros)
 
-    dados.columns = ["FAMILIA", "REGISTRO"]
+    dados = dados.drop_duplicates(
+        subset=["FAMILIA", "REGISTRO", "FABRICA"]
+    )
 
-    dados = dados.dropna(how="all")
-
-    dados["FAMILIA"] = dados["FAMILIA"].apply(normalizar_familia)
-
-    # Mantém apenas famílias numéricas
-    dados = dados[
-        dados["FAMILIA"].astype(str).str.fullmatch(r"\d+")
-    ]
-    dados["REGISTRO"] = dados["REGISTRO"].astype(str).str.strip()
-
-    dados = dados[
-        (dados["FAMILIA"] != "") &
-        (dados["FAMILIA"].str.lower() != "nan") &
-        (dados["REGISTRO"] != "") &
-        (dados["REGISTRO"].str.lower() != "nan")
-    ]
-
-    dados["FABRICA"] = aba
+    dados["FAMILIA_NUM"] = pd.to_numeric(dados["FAMILIA"], errors="coerce")
+    dados = dados.sort_values(
+        by=["FAMILIA_NUM", "REGISTRO"]
+    ).drop(columns=["FAMILIA_NUM"])
 
     return dados
 
