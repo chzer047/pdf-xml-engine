@@ -685,10 +685,11 @@ def exportar_todos_itens():
 # TABS
 # ==========================================
 
-aba1, aba2, aba3 = st.tabs([
+aba1, aba2, aba3, aba4 = st.tabs([
     "PDF → XML",
     "Banco de Certificados",
-    "Consultar IP-BRI"
+    "Consultar IP-BRI",
+    "Registros"
 ])
 
 # ==========================================
@@ -1180,3 +1181,138 @@ with aba3:
                 f"{busca_ip.replace('/', '-')}.csv",
                 "text/csv"
             )
+# ==========================================
+# ABA 4 - REGISTROS
+# ==========================================
+
+with aba4:
+
+    st.title("Registros")
+
+    st.info("""
+Envie o Excel de registros da BOLSA.
+
+Cada aba do Excel = uma fábrica.
+
+O sistema irá:
+- identificar a fábrica pela aba;
+- ler coluna FAMÍLIA;
+- ler coluna REGISTRO;
+- cruzar automaticamente com CE-BRI/IP-BRI futuramente.
+""")
+
+    registro_excel = st.file_uploader(
+        "Envie o Excel de Registros",
+        type=["xlsx", "xls"],
+        key="excel_registros"
+    )
+
+    if registro_excel:
+
+        try:
+
+            excel = pd.ExcelFile(registro_excel)
+
+            abas = excel.sheet_names
+
+            st.success(f"{len(abas)} fábricas encontradas ✅")
+
+            todas_fabricas = []
+
+            for aba in abas:
+
+                st.divider()
+
+                st.subheader(f"Fábrica: {aba}")
+
+                try:
+
+                    df = pd.read_excel(
+                        registro_excel,
+                        sheet_name=aba
+                    )
+
+                    df.columns = [
+                        str(c).strip().upper()
+                        for c in df.columns
+                    ]
+
+                    coluna_familia = None
+                    coluna_registro = None
+
+                    for c in df.columns:
+
+                        if "FAM" in c:
+                            coluna_familia = c
+
+                        if "REG" in c:
+                            coluna_registro = c
+
+                    if not coluna_familia or not coluna_registro:
+
+                        st.warning(
+                            f"Aba {aba} não possui colunas FAMÍLIA/REGISTRO válidas."
+                        )
+
+                        continue
+
+                    df_filtrado = df[
+                        [coluna_familia, coluna_registro]
+                    ].copy()
+
+                    df_filtrado.columns = [
+                        "FAMILIA",
+                        "REGISTRO"
+                    ]
+
+                    df_filtrado = df_filtrado.dropna(
+                        subset=["FAMILIA"]
+                    )
+
+                    df_filtrado["FABRICA"] = aba
+
+                    st.dataframe(
+                        df_filtrado,
+                        use_container_width=True
+                    )
+
+                    todas_fabricas.append(df_filtrado)
+
+                except Exception as e:
+
+                    st.error(
+                        f"Erro na aba {aba}: {e}"
+                    )
+
+            if todas_fabricas:
+
+                banco_registros = pd.concat(
+                    todas_fabricas,
+                    ignore_index=True
+                )
+
+                st.divider()
+
+                st.subheader("Banco Geral de Registros")
+
+                st.dataframe(
+                    banco_registros,
+                    use_container_width=True
+                )
+
+                st.download_button(
+                    "Baixar registros tratados CSV",
+                    banco_registros.to_csv(
+                        index=False,
+                        sep=";"
+                    ).encode(
+                        "ISO-8859-1",
+                        errors="replace"
+                    ),
+                    "registros_tratados.csv",
+                    "text/csv"
+                )
+
+        except Exception as e:
+
+            st.error(f"Erro ao ler Excel: {e}")
