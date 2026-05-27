@@ -774,3 +774,237 @@ with aba1:
                     f,
                     "resultado_xml.zip"
                 )
+# ==========================================
+# ABA BANCO
+# ==========================================
+
+with aba2:
+
+    st.title("Banco de Certificados")
+
+    st.subheader("Backup do Banco")
+
+    backup_upload = st.file_uploader(
+        "Importar backup certificados.db",
+        type=["db"],
+        key="backup_db"
+    )
+
+    if backup_upload:
+        conn.close()
+
+        with open(DB_PATH, "wb") as f:
+            f.write(backup_upload.read())
+
+        st.success("Backup importado com sucesso. Recarregue o app.")
+        st.stop()
+
+    if Path(DB_PATH).exists():
+        with open(DB_PATH, "rb") as f:
+            st.download_button(
+                "Baixar backup atualizado",
+                f,
+                "certificados.db",
+                "application/octet-stream"
+            )
+
+    st.divider()
+
+    st.subheader("Exportar banco completo")
+
+    todos = exportar_todos_itens()
+
+    if todos.empty:
+        st.info("Nenhum item cadastrado ainda.")
+    else:
+        st.download_button(
+            "Baixar banco completo",
+            todos.to_csv(index=False, sep=";").encode("ISO-8859-1", errors="replace"),
+            "banco_completo.csv",
+            "text/csv"
+        )
+
+    st.divider()
+
+    st.subheader("Pesquisar item no banco")
+
+    tipo_busca = st.selectbox(
+        "Pesquisar por",
+        ["Referência / Modelo", "Código de Barras"]
+    )
+
+    termo_busca = st.text_input("Digite a referência/modelo ou código de barras")
+
+    if termo_busca:
+        campo = "i.modelo" if tipo_busca == "Referência / Modelo" else "i.codigo"
+
+        resultado_item = pd.read_sql_query(f"""
+        SELECT
+            i.marca,
+            i.modelo,
+            i.nome,
+            i.codigo,
+            c.ip_bri,
+            c.ce_bri,
+            c.rev,
+            c.produto,
+            c.data_emissao,
+            i.ordem
+        FROM itens i
+        INNER JOIN certificados c
+        ON c.id = i.certificado_id
+        WHERE {campo} LIKE ?
+        ORDER BY i.marca, i.modelo, c.ip_bri, i.ordem
+        """, conn, params=(f"%{termo_busca}%",))
+
+        if resultado_item.empty:
+            st.warning("Nenhum item encontrado.")
+        else:
+            st.success("Item encontrado ✅")
+            st.dataframe(resultado_item, use_container_width=True)
+
+    st.divider()
+
+    st.subheader("Itens Repetidos")
+
+    if st.button("Itens repetidos"):
+        itens_repetidos = pd.read_sql_query("""
+        SELECT
+            i.marca,
+            i.modelo,
+            i.nome,
+            i.codigo,
+            c.ip_bri,
+            c.ce_bri,
+            c.rev,
+            c.produto,
+            c.data_emissao,
+            i.ordem
+        FROM itens i
+        INNER JOIN certificados c
+        ON c.id = i.certificado_id
+        WHERE i.codigo IN (
+            SELECT codigo
+            FROM itens
+            WHERE codigo IS NOT NULL
+            AND codigo != ''
+            GROUP BY codigo
+            HAVING COUNT(*) > 1
+        )
+        ORDER BY i.codigo, i.marca, i.modelo
+        """, conn)
+
+        if itens_repetidos.empty:
+            st.success("Nenhum item repetido encontrado ✅")
+        else:
+            st.warning("Itens repetidos encontrados.")
+            st.dataframe(itens_repetidos, use_container_width=True)
+
+    st.divider()
+
+    st.subheader("Filtro geral por Marca")
+
+    marcas_banco = pd.read_sql_query("""
+    SELECT DISTINCT marca
+    FROM itens
+    WHERE marca IS NOT NULL
+    AND marca != ''
+    ORDER BY marca
+    """, conn)
+
+    if marcas_banco.empty:
+        st.info("Nenhuma marca cadastrada.")
+    else:
+        marca_filtro = st.selectbox(
+            "Selecione uma marca",
+            marcas_banco["marca"].tolist()
+        )
+
+        resultado_marca = pd.read_sql_query("""
+        SELECT
+            i.marca,
+            i.modelo,
+            i.nome,
+            i.codigo,
+            c.ip_bri,
+            c.ce_bri,
+            c.rev,
+            c.produto,
+            c.data_emissao,
+            i.ordem
+        FROM itens i
+        INNER JOIN certificados c
+        ON c.id = i.certificado_id
+        WHERE i.marca = ?
+        ORDER BY i.marca, i.modelo, c.ip_bri
+        """, conn, params=(marca_filtro,))
+
+        st.dataframe(resultado_marca, use_container_width=True)
+
+        st.download_button(
+            "Baixar CSV da marca",
+            resultado_marca.to_csv(index=False, sep=";").encode("ISO-8859-1", errors="replace"),
+            f"marca_{marca_filtro}.csv",
+            "text/csv"
+        )
+
+    st.divider()
+
+    st.subheader("Histórico por IP-BRI")
+
+    ip_historico = st.text_input("Digite o IP-BRI")
+
+    if ip_historico:
+        historico = pd.read_sql_query("""
+        SELECT
+            ip_bri,
+            rev_antiga,
+            rev_nova,
+            modelo,
+            codigo,
+            tipo_alteracao,
+            campo_alterado,
+            valor_antigo,
+            valor_novo,
+            arquivo_pdf,
+            data_hora
+        FROM historico_alteracoes
+        WHERE ip_bri LIKE ?
+        ORDER BY id DESC
+        """, conn, params=(f"%{ip_historico}%",))
+
+        if historico.empty:
+            st.warning("Nenhum histórico encontrado.")
+        else:
+            grupos = historico.groupby(
+                ["rev_antiga", "rev_nova", "arquivo_pdf", "data_hora"],
+                dropna=False
+            )
+
+            for (rev_antiga, rev_nova, arquivo_pdf, data_hora), grupo in grupos:
+                with st.expander(f"REV {rev_antiga} → REV {rev_nova} | {data_hora}"):
+
+                    col1, col2, col3 = st.columns(3)
+
+                    col1.metric("Itens novos", len(grupo[grupo["tipo_alteracao"] == "ITEM_NOVO"]))
+                    col2.metric("Itens removidos", len(grupo[grupo["tipo_alteracao"] == "ITEM_REMOVIDO"]))
+                    col3.metric("Campos alterados", len(grupo[grupo["tipo_alteracao"] == "CAMPO_ALTERADO"]))
+
+                    for _, row in grupo.iterrows():
+                        tipo = row["tipo_alteracao"]
+
+                        if tipo == "ITEM_REMOVIDO":
+                            st.error(f"🗑️ ITEM REMOVIDO\n\nModelo: {row['modelo']}\n\nCódigo: {row['codigo']}")
+
+                        elif tipo == "ITEM_NOVO":
+                            st.success(f"➕ ITEM NOVO\n\nModelo: {row['modelo']}\n\nCódigo: {row['codigo']}")
+
+                        elif tipo == "CAMPO_ALTERADO":
+                            st.warning(
+                                f"✏️ CAMPO ALTERADO\n\n"
+                                f"Modelo: {row['modelo']}\n\n"
+                                f"Código: {row['codigo']}\n\n"
+                                f"Campo: {row['campo_alterado']}\n\n"
+                                f"Antes: {row['valor_antigo']}\n\n"
+                                f"Depois: {row['valor_novo']}"
+                            )
