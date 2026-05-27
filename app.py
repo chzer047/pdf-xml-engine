@@ -1086,7 +1086,10 @@ with aba3:
 
     st.title("Consultar IP-BRI")
 
-    busca_ip = st.text_input("Digite o IP-BRI que deseja consultar")
+    busca_ip = st.text_input(
+    "Digite o IP-BRI que deseja consultar",
+    key="consulta_ip_bri_aba3"
+)
 
     if busca_ip:
 
