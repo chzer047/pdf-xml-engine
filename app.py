@@ -659,7 +659,15 @@ def salvar_ou_atualizar_certificado(
     certificado_id = existente[0]
     rev_antiga = int(existente[1] or 0)
 
-    if rev_nova <= rev_antiga:
+    # Verifica se o certificado existe, mas ficou sem itens no banco.
+    # Nesse caso, mesmo com REV igual ou menor, o sistema preenche os itens sem apagar dados úteis.
+    qtd_itens_existentes = cursor.execute("""
+    SELECT COUNT(*)
+    FROM itens
+    WHERE certificado_id = ?
+    """, (certificado_id,)).fetchone()[0]
+
+    if rev_nova <= rev_antiga and qtd_itens_existentes > 0:
         registrar_historico(
             ip_bri,
             rev_antiga,
@@ -674,6 +682,64 @@ def salvar_ou_atualizar_certificado(
         )
 
         return "ignorado", "REV menor ou igual. Banco não alterado."
+
+    if rev_nova <= rev_antiga and qtd_itens_existentes == 0:
+        cursor.execute("""
+        UPDATE certificados
+        SET
+            produto = ?,
+            ce_bri = ?,
+            rev = ?,
+            data_emissao = ?,
+            arquivo_pdf = ?,
+            data_atualizacao = ?
+        WHERE id = ?
+        """, (
+            dados_certificado["produto"],
+            dados_certificado["ce_bri"],
+            rev_nova,
+            dados_certificado["data_emissao"],
+            nome_arquivo,
+            datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+            certificado_id
+        ))
+
+        for r in rows:
+            cursor.execute("""
+            INSERT INTO itens (
+                certificado_id,
+                ordem,
+                marca,
+                modelo,
+                nome,
+                codigo
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """, (
+                certificado_id,
+                r[0],
+                r[1],
+                r[2],
+                r[3],
+                r[4]
+            ))
+
+        conn.commit()
+
+        registrar_historico(
+            ip_bri,
+            rev_antiga,
+            rev_nova,
+            "",
+            "",
+            "ITENS_REINSERIDOS",
+            "",
+            "Certificado existia sem itens vinculados",
+            f"{len(rows)} itens inseridos na REV {rev_nova}",
+            nome_arquivo
+        )
+
+        return "corrigido", f"Certificado já existia, mas estava sem itens. {len(rows)} itens foram inseridos."
 
     antigos = cursor.execute("""
     SELECT
