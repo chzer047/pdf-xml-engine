@@ -1082,3 +1082,45 @@ with aba3:
                     f"itens_{busca_ip.replace('/', '-')}.csv",
                     "text/csv"
                 )
+with aba3:
+
+    st.title("Consultar IP-BRI")
+
+    busca_ip = st.text_input("Digite o IP-BRI que deseja consultar")
+
+    if busca_ip:
+
+        itens_ip = pd.read_sql_query("""
+        SELECT
+            i.marca,
+            i.modelo,
+            i.nome,
+            i.codigo,
+            c.ip_bri,
+            c.ce_bri,
+            c.rev,
+            c.produto,
+            c.data_emissao,
+            i.ordem
+        FROM itens i
+        INNER JOIN certificados c
+        ON c.id = i.certificado_id
+        WHERE c.ip_bri LIKE ?
+        ORDER BY i.marca, i.modelo, i.ordem
+        """, conn, params=(f"%{busca_ip}%",))
+
+        if itens_ip.empty:
+            st.warning("Nenhum item encontrado para esse IP-BRI.")
+        else:
+            st.success(f"{len(itens_ip)} itens encontrados ✅")
+            st.dataframe(itens_ip, use_container_width=True)
+
+            st.download_button(
+                "Baixar todos os itens deste IP-BRI em CSV",
+                itens_ip.to_csv(index=False, sep=";").encode(
+                    "ISO-8859-1",
+                    errors="replace"
+                ),
+                f"itens_ip_bri.csv",
+                "text/csv"
+            )
