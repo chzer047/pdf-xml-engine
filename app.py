@@ -48,11 +48,13 @@ CREATE TABLE IF NOT EXISTS itens (
 conn.commit()
 
 # =========================
-# AJUSTE PARA BANCO ANTIGO
+# AJUSTE BANCO ANTIGO
 # =========================
 
 try:
-    cursor.execute("ALTER TABLE certificados ADD COLUMN fabricante TEXT")
+    cursor.execute(
+        "ALTER TABLE certificados ADD COLUMN fabricante TEXT"
+    )
     conn.commit()
 except:
     pass
@@ -62,6 +64,7 @@ except:
 # =========================
 
 def clean(x):
+
     if x is None:
         return ""
 
@@ -73,6 +76,7 @@ def clean(x):
 
 
 def corrigir_texto(texto):
+
     if texto is None:
         return ""
 
@@ -84,7 +88,10 @@ def extrair_codigo_unico(codigo_raw):
     if not codigo_raw:
         return None
 
-    codigo = re.split(r"[\/\n]", codigo_raw)[0]
+    codigo = re.split(
+        r"[\/\n]",
+        codigo_raw
+    )[0]
 
     codigo = re.sub(r"\D", "", codigo)
 
@@ -103,9 +110,20 @@ def limitar_nome(nome):
 
     if len(nome) > 200:
 
-        nome = nome.replace("PRODUZIDO", "PROD.")
-        nome = nome.replace("INDICATIVO", "IND.")
-        nome = nome.replace("RESTRITIVO", "REST.")
+        nome = nome.replace(
+            "PRODUZIDO",
+            "PROD."
+        )
+
+        nome = nome.replace(
+            "INDICATIVO",
+            "IND."
+        )
+
+        nome = nome.replace(
+            "RESTRITIVO",
+            "REST."
+        )
 
         nome = nome[:200]
 
@@ -130,10 +148,11 @@ def verificar_codigos_duplicados(df):
     ].copy()
 
     if not duplicados.empty:
-        duplicados = duplicados.sort_values(by="CODIGO")
+        duplicados = duplicados.sort_values(
+            by="CODIGO"
+        )
 
     return duplicados
-
 
 # =========================
 # FABRICANTE
@@ -150,62 +169,36 @@ def extrair_fabricante_primeira_pagina(pdf_path):
 
     texto = corrigir_texto(texto)
 
+    # 🔥 BLOCO ENTRE FABRICANTE E REFERÊNCIA
+    match = re.search(
+        r"Fabricante:\s*(.*?)(?=Referência Normativa|Referencia Normativa|Última data|Ultima data|Relatório|Relatorio|Este Certificado)",
+        texto,
+        flags=re.IGNORECASE | re.DOTALL
+    )
+
+    if not match:
+        return None
+
+    fabricante = match.group(1)
+
+    # 🔥 REMOVE DATAS SOLTAS
+    fabricante = re.sub(
+        r"\b\d{2}/\d{2}/\d{4}\b",
+        "",
+        fabricante
+    )
+
     linhas = [
         clean(linha)
-        for linha in texto.split("\n")
+        for linha in fabricante.split("\n")
         if clean(linha)
     ]
 
-    fabricante_linhas = []
-
-    capturando = False
-
-    parar_em = [
-        "Referência Normativa",
-        "Última data",
-        "Relatório",
-        "Este Certificado",
-        "HENRIQUE",
-        "Avenida",
-        "Solicitante:",
-        "Código da empresa:",
-        "Etapa Atual:",
-        "Data de Revisão:",
-        "REV."
-    ]
-
-    for linha in linhas:
-
-        if linha.startswith("Fabricante:"):
-
-            capturando = True
-
-            conteudo = linha.replace(
-                "Fabricante:",
-                ""
-            ).strip()
-
-            if conteudo:
-                fabricante_linhas.append(conteudo)
-
-            continue
-
-        if capturando:
-
-            if any(
-                linha.startswith(p)
-                for p in parar_em
-            ):
-                break
-
-            fabricante_linhas.append(linha)
-
     fabricante = clean(
-        " ".join(fabricante_linhas)
+        " ".join(linhas)
     )
 
     return fabricante or None
-
 
 # =========================
 # DADOS CERTIFICADO
@@ -227,7 +220,7 @@ def extrair_dados_certificado(pdf_path):
     data_emissao = None
     data_validade = None
 
-    # IP-BRI
+    # 🔥 IP-BRI
     ip_match = re.search(
         r"IP-BRI-\d+\/\d+-\d+",
         texto
@@ -236,16 +229,18 @@ def extrair_dados_certificado(pdf_path):
     if ip_match:
         ip_bri = ip_match.group(0)
 
-    # PRODUTO
+    # 🔥 PRODUTO
     produto_match = re.search(
         r"Produto:\s*(.+)",
         texto
     )
 
     if produto_match:
-        produto = clean(produto_match.group(1))
+        produto = clean(
+            produto_match.group(1)
+        )
 
-    # DATA EMISSÃO
+    # 🔥 DATA EMISSÃO
     emissao_match = re.search(
         r"Data de Emissão:\s*(\d{2}/\d{2}/\d{4})",
         texto
@@ -254,10 +249,11 @@ def extrair_dados_certificado(pdf_path):
     if emissao_match:
         data_emissao = emissao_match.group(1)
 
-    # PRÓXIMA MANUTENÇÃO = VALIDADE
+    # 🔥 PRÓXIMA MANUTENÇÃO
     manutencao_match = re.search(
         r"Próxima Manutenção/Revisão:\s*(\d{2}/\d{2}/\d{4})",
-        texto
+        texto,
+        flags=re.IGNORECASE
     )
 
     if manutencao_match:
@@ -274,7 +270,6 @@ def extrair_dados_certificado(pdf_path):
         "data_emissao": data_emissao,
         "data_validade": data_validade
     }
-
 
 # =========================
 # PARSE PDF
@@ -340,7 +335,6 @@ def parse_pdf(pdf_path):
 
     return rows
 
-
 # =========================
 # XML
 # =========================
@@ -367,10 +361,11 @@ def gerar_xml(df, sufixo):
 </ItemSolicitacao>
 """)
 
-    linhas.append("</ArrayOfItemSolicitacao>")
+    linhas.append(
+        "</ArrayOfItemSolicitacao>"
+    )
 
     return "\n".join(linhas)
-
 
 # =========================
 # TABS
@@ -382,7 +377,7 @@ aba1, aba2 = st.tabs([
 ])
 
 # =========================
-# ABA 1
+# ABA 1 - XML
 # =========================
 
 with aba1:
@@ -410,9 +405,11 @@ with aba1:
             rows = parse_pdf(pdf_path)
 
             if not rows:
+
                 st.error(
                     "Nenhum item válido encontrado"
                 )
+
                 st.stop()
 
             df = pd.DataFrame(
@@ -471,7 +468,7 @@ with aba1:
                 )
 
 # =========================
-# ABA 2
+# ABA 2 - BANCO
 # =========================
 
 with aba2:
