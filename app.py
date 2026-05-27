@@ -84,6 +84,18 @@ CREATE TABLE IF NOT EXISTS historico_alteracoes (
 )
 """)
 
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS registros (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fabrica TEXT,
+    ce_bri TEXT,
+    familia TEXT,
+    registro TEXT,
+    arquivo_excel TEXT,
+    data_cadastro TEXT
+)
+""")
+
 conn.commit()
 
 # ==========================================
@@ -203,6 +215,19 @@ def extrair_rev(texto):
 # ==========================================
 
 
+def extrair_familia_ip_bri(ip_bri):
+    if not ip_bri:
+        return None
+
+    match = re.search(r"-([0-9]+)$", ip_bri)
+
+    if not match:
+        return None
+
+    return str(int(match.group(1)))
+
+
+
 def extrair_dados_certificado(pdf_path):
     doc = fitz.open(str(pdf_path))
 
@@ -253,12 +278,14 @@ def extrair_dados_certificado(pdf_path):
         data_emissao = emissao_match.group(1)
 
     rev = extrair_rev(texto)
+    familia = extrair_familia_ip_bri(ip_bri)
 
     return {
         "ip_bri": ip_bri,
         "produto": produto,
         "ce_bri": ce_bri,
         "rev": rev,
+        "familia": familia,
         "data_emissao": data_emissao
     }
 
@@ -727,6 +754,20 @@ def parece_registro(valor):
 
 
 
+def extrair_ce_bri_da_aba(aba):
+    match = re.search(
+        r"CE-BRI-[A-Z0-9\-]+",
+        str(aba),
+        flags=re.IGNORECASE
+    )
+
+    if match:
+        return match.group(0).upper()
+
+    return None
+
+
+
 def ler_registros_aba(excel_file, aba):
     bruto = pd.read_excel(
         excel_file,
@@ -737,8 +778,6 @@ def ler_registros_aba(excel_file, aba):
 
     registros = []
 
-    # Procura TODOS os blocos com colunas FAMÍLIA e REGISTRO dentro da aba.
-    # Isso resolve planilhas com várias tabelas, linhas mescladas ou cabeçalhos repetidos.
     for i, row in bruto.iterrows():
         valores = [str(v).strip().upper() for v in row.values]
 
@@ -767,7 +806,6 @@ def ler_registros_aba(excel_file, aba):
                 linha_atual = [str(v).strip().upper() for v in bruto.iloc[j].values]
                 linha_texto = " ".join([v for v in linha_atual if v and v.lower() != "nan"])
 
-                # Se encontrar outro cabeçalho, encerra esse bloco e deixa o loop principal tratar o próximo.
                 if ("FAMILIA" in linha_texto or "FAMÍLIA" in linha_texto) and "REGISTRO" in linha_texto:
                     break
 
@@ -781,10 +819,10 @@ def ler_registros_aba(excel_file, aba):
                     registros.append({
                         "FAMILIA": familia,
                         "REGISTRO": registro,
-                        "FABRICA": aba
+                        "FABRICA": aba,
+                        "CE_BRI": extrair_ce_bri_da_aba(aba)
                     })
 
-    # Plano B: varre a planilha inteira procurando família numérica com registro logo ao lado.
     if not registros:
         for i, row in bruto.iterrows():
             for col in range(bruto.shape[1] - 1):
@@ -795,7 +833,8 @@ def ler_registros_aba(excel_file, aba):
                     registros.append({
                         "FAMILIA": familia,
                         "REGISTRO": registro,
-                        "FABRICA": aba
+                        "FABRICA": aba,
+                        "CE_BRI": extrair_ce_bri_da_aba(aba)
                     })
 
     if not registros:
@@ -804,7 +843,7 @@ def ler_registros_aba(excel_file, aba):
     dados = pd.DataFrame(registros)
 
     dados = dados.drop_duplicates(
-        subset=["FAMILIA", "REGISTRO", "FABRICA"]
+        subset=["FAMILIA", "REGISTRO", "FABRICA", "CE_BRI"]
     )
 
     dados["FAMILIA_NUM"] = pd.to_numeric(dados["FAMILIA"], errors="coerce")
@@ -813,6 +852,75 @@ def ler_registros_aba(excel_file, aba):
     ).drop(columns=["FAMILIA_NUM"])
 
     return dados
+
+
+
+def salvar_registros_no_banco(banco_registros, arquivo_nome):
+    if banco_registros is None or banco_registros.empty:
+        return 0
+
+    cursor.execute("DELETE FROM registros")
+
+    total = 0
+
+    for _, r in banco_registros.iterrows():
+        cursor.execute("""
+        INSERT INTO registros (
+            fabrica,
+            ce_bri,
+            familia,
+            registro,
+            arquivo_excel,
+            data_cadastro
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            r.get("FABRICA", ""),
+            r.get("CE_BRI", ""),
+            str(r.get("FAMILIA", "")),
+            r.get("REGISTRO", ""),
+            arquivo_nome,
+            datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        ))
+        total += 1
+
+    conn.commit()
+    return total
+
+
+
+def exportar_registros_banco():
+    return pd.read_sql_query("""
+    SELECT
+        fabrica,
+        ce_bri,
+        familia,
+        registro,
+        arquivo_excel,
+        data_cadastro
+    FROM registros
+    ORDER BY fabrica, CAST(familia AS INTEGER), registro
+    """, conn)
+
+
+
+def buscar_registro_por_certificado(ce_bri, familia):
+    if not ce_bri or not familia:
+        return pd.DataFrame()
+
+    return pd.read_sql_query("""
+    SELECT
+        fabrica,
+        ce_bri,
+        familia,
+        registro,
+        arquivo_excel,
+        data_cadastro
+    FROM registros
+    WHERE UPPER(ce_bri) = UPPER(?)
+    AND familia = ?
+    ORDER BY fabrica, familia, registro
+    """, conn, params=(ce_bri, str(int(familia))))
 
 
 # ==========================================
@@ -876,9 +984,22 @@ IP-BRI: {dados_certificado['ip_bri']}
 
 CE-BRI: {dados_certificado['ce_bri']}
 
+FAMÍLIA: {dados_certificado.get('familia')}
+
 REV: {dados_certificado['rev']}
 """
             )
+
+            registro_vinculado = buscar_registro_por_certificado(
+                dados_certificado.get("ce_bri"),
+                dados_certificado.get("familia")
+            )
+
+            if registro_vinculado.empty:
+                st.warning("Nenhum registro vinculado encontrado para este CE-BRI + FAMÍLIA.")
+            else:
+                st.success("Registro vinculado encontrado ✅")
+                st.dataframe(registro_vinculado, use_container_width=True)
 
             duplicados = verificar_codigos_duplicados(df)
 
@@ -1003,13 +1124,25 @@ with aba2:
             dados_certificado = extrair_dados_certificado(pdf_path)
             rows = parse_pdf(pdf_path)
 
-            col1, col2, col3, col4, col5 = st.columns(5)
+            col1, col2, col3, col4, col5, col6 = st.columns(6)
 
             col1.metric("IP-BRI", dados_certificado["ip_bri"] or "Não encontrado")
             col2.metric("CE-BRI", dados_certificado["ce_bri"] or "Não encontrado")
-            col3.metric("REV", dados_certificado["rev"])
-            col4.metric("Produto", dados_certificado["produto"] or "Não encontrado")
-            col5.metric("Emissão", dados_certificado["data_emissao"] or "Não encontrado")
+            col3.metric("FAM", dados_certificado.get("familia") or "Não encontrada")
+            col4.metric("REV", dados_certificado["rev"])
+            col5.metric("Produto", dados_certificado["produto"] or "Não encontrado")
+            col6.metric("Emissão", dados_certificado["data_emissao"] or "Não encontrado")
+
+            registro_vinculado = buscar_registro_por_certificado(
+                dados_certificado.get("ce_bri"),
+                dados_certificado.get("familia")
+            )
+
+            if registro_vinculado.empty:
+                st.warning("Nenhum registro vinculado encontrado para este CE-BRI + FAMÍLIA.")
+            else:
+                st.success("Registro vinculado encontrado ✅")
+                st.dataframe(registro_vinculado, use_container_width=True)
 
             if rows:
                 df_preview = pd.DataFrame(
@@ -1362,6 +1495,49 @@ with aba3:
 with aba4:
     st.title("Registros")
 
+    st.subheader("Backup dos Registros / Banco")
+
+    backup_registro_upload = st.file_uploader(
+        "Importar backup certificados.db",
+        type=["db"],
+        key="backup_db_registros"
+    )
+
+    if backup_registro_upload:
+        conn.close()
+
+        with open(DB_PATH, "wb") as f:
+            f.write(backup_registro_upload.read())
+
+        st.success("Backup importado com sucesso. Recarregue o app.")
+        st.stop()
+
+    if Path(DB_PATH).exists():
+        with open(DB_PATH, "rb") as f:
+            st.download_button(
+                "Baixar backup atualizado",
+                f,
+                "certificados.db",
+                "application/octet-stream",
+                key="download_backup_registros"
+            )
+
+    registros_salvos = exportar_registros_banco()
+
+    if not registros_salvos.empty:
+        st.download_button(
+            "Baixar registros salvos CSV",
+            registros_salvos.to_csv(index=False, sep=";").encode(
+                "ISO-8859-1",
+                errors="replace"
+            ),
+            "registros_salvos.csv",
+            "text/csv",
+            key="download_registros_salvos"
+        )
+
+    st.divider()
+
     st.info(
         "Envie o Excel de registros. Cada aba será tratada como uma fábrica. "
         "O sistema vai procurar automaticamente as colunas FAMÍLIA e REGISTRO."
@@ -1414,6 +1590,13 @@ with aba4:
                     banco_registros,
                     use_container_width=True
                 )
+
+                total_salvo = salvar_registros_no_banco(
+                    banco_registros,
+                    registro_excel.name
+                )
+
+                st.success(f"{total_salvo} registros salvos no banco ✅")
 
                 st.download_button(
                     "Baixar registros tratados CSV",
