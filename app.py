@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS historico_alteracoes (
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS registros (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cliente_base TEXT,
     fabrica TEXT,
     ce_bri TEXT,
     familia TEXT,
@@ -554,7 +555,7 @@ def salvar_ou_atualizar_certificado(
                 nome,
                 codigo
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
                 certificado_id,
                 r[0],
@@ -691,20 +692,26 @@ def salvar_ou_atualizar_certificado(
 def exportar_todos_itens():
     return pd.read_sql_query("""
     SELECT
-        i.marca,
-        i.modelo,
-        i.nome,
-        i.codigo,
-        c.ip_bri,
-        c.ce_bri,
-        c.rev,
-        c.produto,
-        c.data_emissao,
-        i.ordem
+        i.marca AS marca,
+        i.modelo AS modelo,
+        i.nome AS nome,
+        i.codigo AS codigo,
+        c.ip_bri AS ip_bri,
+        c.ce_bri AS ce_bri,
+        r.registro AS registro,
+        CAST(CAST(substr(c.ip_bri, -2) AS INTEGER) AS TEXT) AS fam,
+        r.fabrica AS fabrica,
+        c.rev AS rev,
+        c.produto AS produto,
+        c.data_emissao AS data_emissao,
+        i.ordem AS ordem
     FROM itens i
     INNER JOIN certificados c
     ON c.id = i.certificado_id
-    ORDER BY i.marca, i.modelo
+    LEFT JOIN registros r
+    ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
+    AND r.familia = CAST(CAST(substr(c.ip_bri, -2) AS INTEGER) AS TEXT)
+    ORDER BY i.marca, i.modelo, c.ip_bri, i.ordem
     """, conn)
 
 
@@ -866,6 +873,7 @@ def salvar_registros_no_banco(banco_registros, arquivo_nome):
     for _, r in banco_registros.iterrows():
         cursor.execute("""
         INSERT INTO registros (
+            cliente_base,
             fabrica,
             ce_bri,
             familia,
@@ -875,6 +883,7 @@ def salvar_registros_no_banco(banco_registros, arquivo_nome):
         )
         VALUES (?, ?, ?, ?, ?, ?)
         """, (
+            cliente_base,
             r.get("FABRICA", ""),
             r.get("CE_BRI", ""),
             str(r.get("FAMILIA", "")),
@@ -892,6 +901,7 @@ def salvar_registros_no_banco(banco_registros, arquivo_nome):
 def exportar_registros_banco():
     return pd.read_sql_query("""
     SELECT
+        cliente_base,
         fabrica,
         ce_bri,
         familia,
@@ -899,7 +909,7 @@ def exportar_registros_banco():
         arquivo_excel,
         data_cadastro
     FROM registros
-    ORDER BY fabrica, CAST(familia AS INTEGER), registro
+    ORDER BY cliente_base, fabrica, CAST(familia AS INTEGER), registro
     """, conn)
 
 
@@ -1198,21 +1208,27 @@ with aba2:
 
         resultado_item = pd.read_sql_query(f"""
         SELECT
-            i.marca,
-            i.modelo,
-            i.nome,
-            i.codigo,
-            c.ip_bri,
-            c.ce_bri,
-            c.rev,
-            c.produto,
-            c.data_emissao,
-            i.ordem
+            i.marca AS marca,
+            i.modelo AS modelo,
+            i.nome AS nome,
+            i.codigo AS codigo,
+            c.ip_bri AS ip_bri,
+            c.ce_bri AS ce_bri,
+            r.registro AS registro,
+            CAST(CAST(substr(c.ip_bri, -2) AS INTEGER) AS TEXT) AS fam,
+            r.fabrica AS fabrica,
+            c.rev AS rev,
+            c.produto AS produto,
+            c.data_emissao AS data_emissao,
+            i.ordem AS ordem
         FROM itens i
         INNER JOIN certificados c
         ON c.id = i.certificado_id
+        LEFT JOIN registros r
+        ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
+        AND r.familia = CAST(CAST(substr(c.ip_bri, -2) AS INTEGER) AS TEXT)
         WHERE {campo} LIKE ?
-        ORDER BY i.marca, i.modelo
+        ORDER BY i.marca, i.modelo, c.ip_bri, i.ordem
         """, conn, params=(f"%{termo_busca}%",))
 
         if resultado_item.empty:
@@ -1238,19 +1254,25 @@ with aba2:
     if st.button("Ver itens repetidos"):
         itens_repetidos = pd.read_sql_query("""
         SELECT
-            i.marca,
-            i.modelo,
-            i.nome,
-            i.codigo,
-            c.ip_bri,
-            c.ce_bri,
-            c.rev,
-            c.produto,
-            c.data_emissao,
-            i.ordem
+            i.marca AS marca,
+            i.modelo AS modelo,
+            i.nome AS nome,
+            i.codigo AS codigo,
+            c.ip_bri AS ip_bri,
+            c.ce_bri AS ce_bri,
+            r.registro AS registro,
+            CAST(CAST(substr(c.ip_bri, -2) AS INTEGER) AS TEXT) AS fam,
+            r.fabrica AS fabrica,
+            c.rev AS rev,
+            c.produto AS produto,
+            c.data_emissao AS data_emissao,
+            i.ordem AS ordem
         FROM itens i
         INNER JOIN certificados c
         ON c.id = i.certificado_id
+        LEFT JOIN registros r
+        ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
+        AND r.familia = CAST(CAST(substr(c.ip_bri, -2) AS INTEGER) AS TEXT)
         WHERE i.codigo IN (
             SELECT codigo
             FROM itens
@@ -1301,21 +1323,27 @@ with aba2:
 
         resultado_marca = pd.read_sql_query("""
         SELECT
-            i.marca,
-            i.modelo,
-            i.nome,
-            i.codigo,
-            c.ip_bri,
-            c.ce_bri,
-            c.rev,
-            c.produto,
-            c.data_emissao,
-            i.ordem
+            i.marca AS marca,
+            i.modelo AS modelo,
+            i.nome AS nome,
+            i.codigo AS codigo,
+            c.ip_bri AS ip_bri,
+            c.ce_bri AS ce_bri,
+            r.registro AS registro,
+            CAST(CAST(substr(c.ip_bri, -2) AS INTEGER) AS TEXT) AS fam,
+            r.fabrica AS fabrica,
+            c.rev AS rev,
+            c.produto AS produto,
+            c.data_emissao AS data_emissao,
+            i.ordem AS ordem
         FROM itens i
         INNER JOIN certificados c
         ON c.id = i.certificado_id
+        LEFT JOIN registros r
+        ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
+        AND r.familia = CAST(CAST(substr(c.ip_bri, -2) AS INTEGER) AS TEXT)
         WHERE i.marca = ?
-        ORDER BY i.modelo
+        ORDER BY i.modelo, c.ip_bri
         """, conn, params=(marca_filtro,))
 
         st.dataframe(resultado_marca, use_container_width=True)
@@ -1455,19 +1483,25 @@ with aba3:
     if busca_ip:
         itens_ip = pd.read_sql_query("""
         SELECT
-            i.marca,
-            i.modelo,
-            i.nome,
-            i.codigo,
-            c.ip_bri,
-            c.ce_bri,
-            c.rev,
-            c.produto,
-            c.data_emissao,
-            i.ordem
+            i.marca AS marca,
+            i.modelo AS modelo,
+            i.nome AS nome,
+            i.codigo AS codigo,
+            c.ip_bri AS ip_bri,
+            c.ce_bri AS ce_bri,
+            r.registro AS registro,
+            CAST(CAST(substr(c.ip_bri, -2) AS INTEGER) AS TEXT) AS fam,
+            r.fabrica AS fabrica,
+            c.rev AS rev,
+            c.produto AS produto,
+            c.data_emissao AS data_emissao,
+            i.ordem AS ordem
         FROM itens i
         INNER JOIN certificados c
         ON c.id = i.certificado_id
+        LEFT JOIN registros r
+        ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
+        AND r.familia = CAST(CAST(substr(c.ip_bri, -2) AS INTEGER) AS TEXT)
         WHERE c.ip_bri LIKE ?
         ORDER BY i.marca, i.modelo, i.ordem
         """, conn, params=(f"%{busca_ip}%",))
@@ -1494,6 +1528,12 @@ with aba3:
 
 with aba4:
     st.title("Registros")
+
+    cliente_base = st.text_input(
+        "Nome da Base / Cliente",
+        value="BOLSA",
+        key="cliente_base_registros"
+    )
 
     st.subheader("Backup dos Registros / Banco")
 
@@ -1535,6 +1575,57 @@ with aba4:
             "text/csv",
             key="download_registros_salvos"
         )
+
+    st.divider()
+
+    bases_existentes = pd.read_sql_query("""
+    SELECT DISTINCT cliente_base
+    FROM registros
+    WHERE cliente_base IS NOT NULL
+    AND cliente_base != ''
+    ORDER BY cliente_base
+    """, conn)
+
+    if not bases_existentes.empty:
+
+        st.subheader("Visualizar Bases")
+
+        base_selecionada = st.selectbox(
+            "Selecione a base",
+            bases_existentes["cliente_base"].tolist(),
+            key="visualizar_base"
+        )
+
+        registros_base = pd.read_sql_query("""
+        SELECT
+            cliente_base,
+            fabrica,
+            ce_bri,
+            familia,
+            registro
+        FROM registros
+        WHERE cliente_base = ?
+        ORDER BY fabrica, CAST(familia AS INTEGER)
+        """, conn, params=(base_selecionada,))
+
+        fabricas = registros_base["fabrica"].unique().tolist()
+
+        for fabrica in fabricas:
+
+            bloco = registros_base[
+                registros_base["fabrica"] == fabrica
+            ]
+
+            st.subheader(f"{base_selecionada} → {fabrica}")
+
+            st.dataframe(
+                bloco[[
+                    "familia",
+                    "registro",
+                    "ce_bri"
+                ]],
+                use_container_width=True
+            )
 
     st.divider()
 
