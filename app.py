@@ -9,6 +9,7 @@ import tempfile
 from ftfy import fix_text
 import sqlite3
 from datetime import datetime
+import shutil
 
 st.set_page_config(page_title="C XML BR Engine", layout="wide")
 
@@ -16,7 +17,9 @@ st.set_page_config(page_title="C XML BR Engine", layout="wide")
 # BANCO DE DADOS
 # =========================
 
-conn = sqlite3.connect("certificados.db", check_same_thread=False)
+DB_PATH = "certificados.db"
+
+conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cursor = conn.cursor()
 
 cursor.execute("""
@@ -425,6 +428,44 @@ with aba2:
     st.title(
         "Banco de Certificados"
     )
+
+    # =========================
+    # BACKUP
+    # =========================
+
+    st.subheader("Backup do Banco")
+
+    backup_upload = st.file_uploader(
+        "Importar backup certificados.db",
+        type=["db"],
+        key="backup_db"
+    )
+
+    if backup_upload:
+
+        conn.close()
+
+        with open(DB_PATH, "wb") as f:
+            f.write(backup_upload.read())
+
+        st.success(
+            "Backup importado com sucesso. Recarregue o app."
+        )
+
+        st.stop()
+
+    if Path(DB_PATH).exists():
+
+        with open(DB_PATH, "rb") as f:
+
+            st.download_button(
+                "Baixar backup atualizado",
+                f,
+                "certificados.db",
+                "application/octet-stream"
+            )
+
+    st.divider()
 
     banco_file = st.file_uploader(
         "Envie um certificado PDF",
