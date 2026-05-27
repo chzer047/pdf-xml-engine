@@ -670,10 +670,26 @@ def reparar_tabela_itens_se_necessario():
 
 
 def inserir_item_seguro(certificado_id, r):
-    garantir_estrutura_banco()
     reparar_tabela_itens_se_necessario()
 
-    inserir_item_seguro(certificado_id, r)
+    cursor.execute("""
+    INSERT INTO itens (
+        certificado_id,
+        ordem,
+        marca,
+        modelo,
+        nome,
+        codigo
+    )
+    VALUES (?, ?, ?, ?, ?, ?)
+    """, (
+        certificado_id,
+        r[0],
+        r[1],
+        r[2],
+        r[3],
+        r[4]
+    ))
 
 
 def salvar_ou_atualizar_certificado(
