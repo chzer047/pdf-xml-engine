@@ -1,6 +1,6 @@
 # ==========================================
 # C XML BR Engine
-# COMPLETO + REV + HISTÓRICO + BANCO
+# COMPLETO + REV + HISTÓRICO + BANCO + REGISTROS
 # ==========================================
 
 import streamlit as st
@@ -87,11 +87,11 @@ CREATE TABLE IF NOT EXISTS historico_alteracoes (
 conn.commit()
 
 # ==========================================
-# FUNÇÕES
+# FUNÇÕES GERAIS
 # ==========================================
 
-def clean(x):
 
+def clean(x):
     if x is None:
         return ""
 
@@ -102,21 +102,20 @@ def clean(x):
     ).strip()
 
 
-def corrigir_texto(texto):
 
+def corrigir_texto(texto):
     if texto is None:
         return ""
 
     return fix_text(str(texto))
 
 
-def extrair_codigo_unico(codigo_raw):
 
+def extrair_codigo_unico(codigo_raw):
     if not codigo_raw:
         return None
 
     codigo = re.split(r"[\/\n]", codigo_raw)[0]
-
     codigo = re.sub(r"\D", "", codigo)
 
     if not codigo or not codigo.isdigit():
@@ -128,42 +127,29 @@ def extrair_codigo_unico(codigo_raw):
     return codigo
 
 
-def limitar_nome(nome):
 
+def limitar_nome(nome):
     nome = clean(nome)
 
     if len(nome) > 200:
-
-        nome = nome.replace(
-            "PRODUZIDO",
-            "PROD."
-        )
-
-        nome = nome.replace(
-            "INDICATIVO",
-            "IND."
-        )
-
-        nome = nome.replace(
-            "RESTRITIVO",
-            "REST."
-        )
-
+        nome = nome.replace("PRODUZIDO", "PROD.")
+        nome = nome.replace("INDICATIVO", "IND.")
+        nome = nome.replace("RESTRITIVO", "REST.")
         nome = nome[:200]
 
     return nome
 
 
-def escape_xml(texto):
 
+def escape_xml(texto):
     return str(texto)\
         .replace("&", "&amp;")\
         .replace("<", "&lt;")\
         .replace(">", "&gt;")
 
 
-def verificar_codigos_duplicados(df):
 
+def verificar_codigos_duplicados(df):
     duplicados = df[
         df.duplicated(
             subset=["CODIGO"],
@@ -172,9 +158,7 @@ def verificar_codigos_duplicados(df):
     ].copy()
 
     if not duplicados.empty:
-        duplicados = duplicados.sort_values(
-            by="CODIGO"
-        )
+        duplicados = duplicados.sort_values(by="CODIGO")
 
     return duplicados
 
@@ -183,8 +167,8 @@ def verificar_codigos_duplicados(df):
 # REV
 # ==========================================
 
-def extrair_rev(texto):
 
+def extrair_rev(texto):
     texto = corrigir_texto(texto)
 
     padroes = [
@@ -194,7 +178,6 @@ def extrair_rev(texto):
     ]
 
     for padrao in padroes:
-
         match = re.search(
             padrao,
             texto,
@@ -204,6 +187,14 @@ def extrair_rev(texto):
         if match:
             return int(match.group(1))
 
+    linhas = [clean(l) for l in texto.split("\n") if clean(l)]
+
+    for i, linha in enumerate(linhas):
+        if linha.upper() in ["REV", "REV.", "REVISÃO", "REVISAO"] and i + 1 < len(linhas):
+            numero = re.sub(r"\D", "", linhas[i + 1])
+            if numero:
+                return int(numero)
+
     return 0
 
 
@@ -211,8 +202,8 @@ def extrair_rev(texto):
 # EXTRAÇÃO CERTIFICADO
 # ==========================================
 
-def extrair_dados_certificado(pdf_path):
 
+def extrair_dados_certificado(pdf_path):
     doc = fitz.open(str(pdf_path))
 
     texto = ""
@@ -253,7 +244,7 @@ def extrair_dados_certificado(pdf_path):
         produto = clean(produto_match.group(1))
 
     emissao_match = re.search(
-        r"Data de Emissão:\s*(\d{2}/\d{2}/\d{4})",
+        r"Data de Emissão:\s*(\d{2}\/\d{2}\/\d{4})",
         texto,
         flags=re.IGNORECASE
     )
@@ -276,50 +267,30 @@ def extrair_dados_certificado(pdf_path):
 # PARSE PDF
 # ==========================================
 
-def parse_pdf(pdf_path):
 
+def parse_pdf(pdf_path):
     rows = []
 
     with pdfplumber.open(str(pdf_path)) as pdf:
-
         for page in pdf.pages:
-
             for table in page.extract_tables() or []:
-
                 for row in table:
-
                     if not row or len(row) < 6:
                         continue
 
                     ordem = clean(row[1])
 
-                    if not re.fullmatch(
-                        r"\d{3}",
-                        ordem
-                    ):
+                    if not re.fullmatch(r"\d{3}", ordem):
                         continue
 
                     ordem = int(ordem)
 
-                    marca = clean(
-                        corrigir_texto(row[2])
-                    )
+                    marca = clean(corrigir_texto(row[2]))
+                    modelo = clean(corrigir_texto(row[3]))
+                    nome = clean(corrigir_texto(row[4]))
 
-                    modelo = clean(
-                        corrigir_texto(row[3])
-                    )
-
-                    nome = clean(
-                        corrigir_texto(row[4])
-                    )
-
-                    codigo_raw = clean(
-                        corrigir_texto(row[5])
-                    )
-
-                    codigo = extrair_codigo_unico(
-                        codigo_raw
-                    )
+                    codigo_raw = clean(corrigir_texto(row[5]))
+                    codigo = extrair_codigo_unico(codigo_raw)
 
                     if not codigo:
                         continue
@@ -341,15 +312,14 @@ def parse_pdf(pdf_path):
 # XML
 # ==========================================
 
-def gerar_xml(df, sufixo):
 
+def gerar_xml(df, sufixo):
     linhas = [
         '<?xml version="1.0" encoding="ISO-8859-1"?>',
         '<ArrayOfItemSolicitacao>'
     ]
 
     for _, r in df.iterrows():
-
         modelo = r["MODELO"].rstrip(".,") + sufixo
 
         linhas.append(f"""
@@ -372,6 +342,7 @@ def gerar_xml(df, sufixo):
 # HISTÓRICO
 # ==========================================
 
+
 def registrar_historico(
     ip_bri,
     rev_antiga,
@@ -384,7 +355,6 @@ def registrar_historico(
     novo,
     arquivo
 ):
-
     cursor.execute("""
     INSERT INTO historico_alteracoes (
         ip_bri,
@@ -417,6 +387,7 @@ def registrar_historico(
     conn.commit()
 
 
+
 def comparar_itens(
     ip_bri,
     rev_antiga,
@@ -425,7 +396,6 @@ def comparar_itens(
     novos,
     arquivo
 ):
-
     antigos_dict = {
         r[2]: r for r in antigos
     }
@@ -435,9 +405,7 @@ def comparar_itens(
     }
 
     for modelo in antigos_dict:
-
         if modelo not in novos_dict:
-
             antigo = antigos_dict[modelo]
 
             registrar_historico(
@@ -448,15 +416,13 @@ def comparar_itens(
                 antigo[4],
                 "ITEM_REMOVIDO",
                 "",
-                f"{antigo}",
+                f"MARCA: {antigo[1]} | MODELO: {antigo[2]} | NOME: {antigo[3]} | CÓDIGO: {antigo[4]}",
                 "",
                 arquivo
             )
 
     for modelo in novos_dict:
-
         if modelo not in antigos_dict:
-
             novo = novos_dict[modelo]
 
             registrar_historico(
@@ -468,14 +434,12 @@ def comparar_itens(
                 "ITEM_NOVO",
                 "",
                 "",
-                f"{novo}",
+                f"MARCA: {novo[1]} | MODELO: {novo[2]} | NOME: {novo[3]} | CÓDIGO: {novo[4]}",
                 arquivo
             )
 
     for modelo in novos_dict:
-
         if modelo in antigos_dict:
-
             antigo = antigos_dict[modelo]
             novo = novos_dict[modelo]
 
@@ -486,11 +450,9 @@ def comparar_itens(
             }
 
             for campo in campos:
-
                 antigo_valor, novo_valor = campos[campo]
 
                 if str(antigo_valor) != str(novo_valor):
-
                     registrar_historico(
                         ip_bri,
                         rev_antiga,
@@ -509,12 +471,12 @@ def comparar_itens(
 # SALVAR / ATUALIZAR
 # ==========================================
 
+
 def salvar_ou_atualizar_certificado(
     dados_certificado,
     rows,
     nome_arquivo
 ):
-
     ip_bri = dados_certificado["ip_bri"]
     rev_nova = dados_certificado["rev"]
 
@@ -528,7 +490,6 @@ def salvar_ou_atualizar_certificado(
     """, (ip_bri,)).fetchone()
 
     if not existente:
-
         cursor.execute("""
         INSERT INTO certificados (
             ip_bri,
@@ -557,7 +518,6 @@ def salvar_ou_atualizar_certificado(
         certificado_id = cursor.lastrowid
 
         for r in rows:
-
             cursor.execute("""
             INSERT INTO itens (
                 certificado_id,
@@ -579,13 +539,39 @@ def salvar_ou_atualizar_certificado(
 
         conn.commit()
 
+        registrar_historico(
+            ip_bri,
+            None,
+            rev_nova,
+            "",
+            "",
+            "CERTIFICADO_NOVO",
+            "",
+            "",
+            f"Novo certificado com {len(rows)} itens",
+            nome_arquivo
+        )
+
         return "novo", "Novo certificado salvo"
 
     certificado_id = existente[0]
     rev_antiga = int(existente[1] or 0)
 
     if rev_nova <= rev_antiga:
-        return "ignorado", "REV menor ou igual"
+        registrar_historico(
+            ip_bri,
+            rev_antiga,
+            rev_nova,
+            "",
+            "",
+            "REV_IGNORADA",
+            "",
+            f"REV banco: {rev_antiga}",
+            f"REV enviada: {rev_nova}",
+            nome_arquivo
+        )
+
+        return "ignorado", "REV menor ou igual. Banco não alterado."
 
     antigos = cursor.execute("""
     SELECT
@@ -633,7 +619,6 @@ def salvar_ou_atualizar_certificado(
     ))
 
     for r in rows:
-
         cursor.execute("""
         INSERT INTO itens (
             certificado_id,
@@ -655,14 +640,28 @@ def salvar_ou_atualizar_certificado(
 
     conn.commit()
 
+    registrar_historico(
+        ip_bri,
+        rev_antiga,
+        rev_nova,
+        "",
+        "",
+        "CERTIFICADO_ATUALIZADO",
+        "",
+        f"REV {rev_antiga}",
+        f"REV {rev_nova}",
+        nome_arquivo
+    )
+
     return "atualizado", f"Atualizado REV {rev_antiga} → {rev_nova}"
+
 
 # ==========================================
 # EXPORTAR
 # ==========================================
 
-def exportar_todos_itens():
 
+def exportar_todos_itens():
     return pd.read_sql_query("""
     SELECT
         i.marca,
@@ -681,6 +680,82 @@ def exportar_todos_itens():
     ORDER BY i.marca, i.modelo
     """, conn)
 
+
+# ==========================================
+# REGISTROS EXCEL
+# ==========================================
+
+
+def normalizar_familia(valor):
+    if pd.isna(valor):
+        return ""
+
+    texto = str(valor).strip()
+
+    if texto.endswith(".0"):
+        texto = texto[:-2]
+
+    numeros = re.findall(r"\d+", texto)
+
+    if numeros:
+        return str(int(numeros[0]))
+
+    return texto
+
+
+
+def ler_registros_aba(excel_file, aba):
+    bruto = pd.read_excel(
+        excel_file,
+        sheet_name=aba,
+        header=None
+    )
+
+    linha_cabecalho = None
+    col_familia = None
+    col_registro = None
+
+    for i, row in bruto.iterrows():
+        valores = [str(v).strip().upper() for v in row.values]
+
+        for idx, valor in enumerate(valores):
+            if "FAMILIA" in valor or "FAMÍLIA" in valor:
+                col_familia = idx
+
+            if "REGISTRO" in valor:
+                col_registro = idx
+
+        if col_familia is not None and col_registro is not None:
+            linha_cabecalho = i
+            break
+
+    if linha_cabecalho is None:
+        return None
+
+    dados = bruto.iloc[
+        linha_cabecalho + 1:,
+        [col_familia, col_registro]
+    ].copy()
+
+    dados.columns = ["FAMILIA", "REGISTRO"]
+
+    dados = dados.dropna(how="all")
+
+    dados["FAMILIA"] = dados["FAMILIA"].apply(normalizar_familia)
+    dados["REGISTRO"] = dados["REGISTRO"].astype(str).str.strip()
+
+    dados = dados[
+        (dados["FAMILIA"] != "") &
+        (dados["FAMILIA"].str.lower() != "nan") &
+        (dados["REGISTRO"] != "") &
+        (dados["REGISTRO"].str.lower() != "nan")
+    ]
+
+    dados["FABRICA"] = aba
+
+    return dados
+
+
 # ==========================================
 # TABS
 # ==========================================
@@ -693,11 +768,10 @@ aba1, aba2, aba3, aba4 = st.tabs([
 ])
 
 # ==========================================
-# ABA 1
+# ABA 1 - XML
 # ==========================================
 
 with aba1:
-
     st.title("PDF → XML")
 
     uploaded_file = st.file_uploader(
@@ -707,14 +781,9 @@ with aba1:
     )
 
     if uploaded_file:
-
         with tempfile.TemporaryDirectory() as tmpdir:
-
             pdf_path = Path(tmpdir) / uploaded_file.name
-
-            pdf_path.write_bytes(
-                uploaded_file.read()
-            )
+            pdf_path.write_bytes(uploaded_file.read())
 
             rows = parse_pdf(pdf_path)
 
@@ -722,9 +791,7 @@ with aba1:
                 st.error("Nenhum item encontrado")
                 st.stop()
 
-            dados_certificado = extrair_dados_certificado(
-                pdf_path
-            )
+            dados_certificado = extrair_dados_certificado(pdf_path)
 
             df = pd.DataFrame(
                 rows,
@@ -746,18 +813,18 @@ with aba1:
 
             st.info(
                 f"""
-IP-BRI: {dados_certificado["ip_bri"]}
+IP-BRI: {dados_certificado['ip_bri']}
 
-CE-BRI: {dados_certificado["ce_bri"]}
+CE-BRI: {dados_certificado['ce_bri']}
 
-REV: {dados_certificado["rev"]}
+REV: {dados_certificado['rev']}
 """
             )
 
             duplicados = verificar_codigos_duplicados(df)
 
             if not duplicados.empty:
-                st.warning("Foram encontrados códigos duplicados.")
+                st.warning("Foram encontrados códigos duplicados neste PDF.")
                 st.dataframe(duplicados, use_container_width=True)
 
             status, mensagem = salvar_ou_atualizar_certificado(
@@ -768,12 +835,12 @@ REV: {dados_certificado["rev"]}
 
             if status == "novo":
                 st.success(mensagem)
-
             elif status == "atualizado":
                 st.warning(mensagem)
-
             elif status == "ignorado":
                 st.info(mensagem)
+            else:
+                st.error(mensagem)
 
             xml_comma = gerar_xml(df, ",")
             xml_dot = gerar_xml(df, ".")
@@ -781,7 +848,6 @@ REV: {dados_certificado["rev"]}
             zip_path = Path(tmpdir) / "resultado_xml.zip"
 
             with zipfile.ZipFile(zip_path, "w") as zipf:
-
                 zipf.writestr(
                     "xml_virgula.xml",
                     xml_comma.encode(
@@ -799,7 +865,6 @@ REV: {dados_certificado["rev"]}
                 )
 
             with open(zip_path, "rb") as f:
-
                 st.download_button(
                     "Baixar XMLs",
                     f,
@@ -807,11 +872,10 @@ REV: {dados_certificado["rev"]}
                 )
 
 # ==========================================
-# ABA 2
+# ABA 2 - BANCO
 # ==========================================
 
 with aba2:
-
     st.title("Banco de Certificados")
 
     st.subheader("Backup do Banco")
@@ -828,7 +892,7 @@ with aba2:
         with open(DB_PATH, "wb") as f:
             f.write(backup_upload.read())
 
-        st.success("Backup importado com sucesso.")
+        st.success("Backup importado com sucesso. Recarregue o app.")
         st.stop()
 
     if Path(DB_PATH).exists():
@@ -846,8 +910,9 @@ with aba2:
 
     todos = exportar_todos_itens()
 
-    if not todos.empty:
-
+    if todos.empty:
+        st.info("Nenhum item cadastrado ainda.")
+    else:
         st.download_button(
             "Baixar banco completo",
             todos.to_csv(
@@ -860,6 +925,66 @@ with aba2:
             "banco_completo.csv",
             "text/csv"
         )
+
+    st.divider()
+
+    st.subheader("Enviar certificado para o banco")
+
+    banco_file = st.file_uploader(
+        "Envie um certificado PDF",
+        type="pdf",
+        key="banco_pdf"
+    )
+
+    if banco_file:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pdf_path = Path(tmpdir) / banco_file.name
+            pdf_path.write_bytes(banco_file.read())
+
+            dados_certificado = extrair_dados_certificado(pdf_path)
+            rows = parse_pdf(pdf_path)
+
+            col1, col2, col3, col4, col5 = st.columns(5)
+
+            col1.metric("IP-BRI", dados_certificado["ip_bri"] or "Não encontrado")
+            col2.metric("CE-BRI", dados_certificado["ce_bri"] or "Não encontrado")
+            col3.metric("REV", dados_certificado["rev"])
+            col4.metric("Produto", dados_certificado["produto"] or "Não encontrado")
+            col5.metric("Emissão", dados_certificado["data_emissao"] or "Não encontrado")
+
+            if rows:
+                df_preview = pd.DataFrame(
+                    rows,
+                    columns=[
+                        "ORDEM",
+                        "MARCA",
+                        "MODELO",
+                        "NOME",
+                        "CODIGO"
+                    ]
+                )
+
+                st.dataframe(df_preview, use_container_width=True)
+
+                duplicados = verificar_codigos_duplicados(df_preview)
+
+                if not duplicados.empty:
+                    st.warning("Foram encontrados códigos duplicados.")
+                    st.dataframe(duplicados, use_container_width=True)
+
+                if st.button("Salvar / Atualizar banco"):
+                    status, mensagem = salvar_ou_atualizar_certificado(
+                        dados_certificado,
+                        rows,
+                        banco_file.name
+                    )
+
+                    if status in ["novo", "atualizado"]:
+                        st.success(mensagem)
+                    elif status == "ignorado":
+                        st.info(mensagem)
+                    else:
+                        st.error(mensagem)
 
     st.divider()
 
@@ -877,7 +1002,6 @@ with aba2:
     )
 
     if termo_busca:
-
         campo = "i.modelo" if tipo_busca == "Referência / Modelo" else "i.codigo"
 
         resultado_item = pd.read_sql_query(f"""
@@ -905,12 +1029,21 @@ with aba2:
             st.success("Item encontrado ✅")
             st.dataframe(resultado_item, use_container_width=True)
 
+            st.download_button(
+                "Baixar resultado da pesquisa em CSV",
+                resultado_item.to_csv(index=False, sep=";").encode(
+                    "ISO-8859-1",
+                    errors="replace"
+                ),
+                "resultado_pesquisa_item.csv",
+                "text/csv"
+            )
+
     st.divider()
 
     st.subheader("Itens Repetidos")
 
     if st.button("Ver itens repetidos"):
-
         itens_repetidos = pd.read_sql_query("""
         SELECT
             i.marca,
@@ -918,17 +1051,23 @@ with aba2:
             i.nome,
             i.codigo,
             c.ip_bri,
-            c.ce_bri
+            c.ce_bri,
+            c.rev,
+            c.produto,
+            c.data_emissao,
+            i.ordem
         FROM itens i
         INNER JOIN certificados c
         ON c.id = i.certificado_id
         WHERE i.codigo IN (
             SELECT codigo
             FROM itens
+            WHERE codigo IS NOT NULL
+            AND codigo != ''
             GROUP BY codigo
             HAVING COUNT(*) > 1
         )
-        ORDER BY i.codigo
+        ORDER BY i.codigo, i.marca, i.modelo
         """, conn)
 
         if itens_repetidos.empty:
@@ -936,6 +1075,16 @@ with aba2:
         else:
             st.warning("Itens repetidos encontrados.")
             st.dataframe(itens_repetidos, use_container_width=True)
+
+            st.download_button(
+                "Baixar itens repetidos em CSV",
+                itens_repetidos.to_csv(index=False, sep=";").encode(
+                    "ISO-8859-1",
+                    errors="replace"
+                ),
+                "itens_repetidos.csv",
+                "text/csv"
+            )
 
     st.divider()
 
@@ -949,8 +1098,9 @@ with aba2:
     ORDER BY marca
     """, conn)
 
-    if not marcas_banco.empty:
-
+    if marcas_banco.empty:
+        st.info("Nenhuma marca cadastrada.")
+    else:
         marca_filtro = st.selectbox(
             "Selecione uma marca",
             marcas_banco["marca"].tolist(),
@@ -980,10 +1130,7 @@ with aba2:
 
         st.download_button(
             "Baixar CSV da marca",
-            resultado_marca.to_csv(
-                index=False,
-                sep=";"
-            ).encode(
+            resultado_marca.to_csv(index=False, sep=";").encode(
                 "ISO-8859-1",
                 errors="replace"
             ),
@@ -1001,7 +1148,6 @@ with aba2:
     )
 
     if ip_historico:
-
         historico = pd.read_sql_query("""
         SELECT
             ip_bri,
@@ -1021,11 +1167,8 @@ with aba2:
         """, conn, params=(f"%{ip_historico}%",))
 
         if historico.empty:
-
             st.warning("Nenhum histórico encontrado.")
-
         else:
-
             grupos = historico.groupby(
                 [
                     "rev_antiga",
@@ -1036,94 +1179,80 @@ with aba2:
                 dropna=False
             )
 
-            for (
-                rev_antiga,
-                rev_nova,
-                arquivo_pdf,
-                data_hora
-            ), grupo in grupos:
-
+            for (rev_antiga, rev_nova, arquivo_pdf, data_hora), grupo in grupos:
                 with st.expander(
-                    f"REV {rev_antiga} → REV {rev_nova} | {data_hora}"
+                    f"REV {rev_antiga} → REV {rev_nova} | {data_hora} | {arquivo_pdf}"
                 ):
-
                     col1, col2, col3 = st.columns(3)
 
                     col1.metric(
                         "Itens novos",
-                        len(grupo[
-                            grupo["tipo_alteracao"] == "ITEM_NOVO"
-                        ])
+                        len(grupo[grupo["tipo_alteracao"] == "ITEM_NOVO"])
                     )
 
                     col2.metric(
                         "Itens removidos",
-                        len(grupo[
-                            grupo["tipo_alteracao"] == "ITEM_REMOVIDO"
-                        ])
+                        len(grupo[grupo["tipo_alteracao"] == "ITEM_REMOVIDO"])
                     )
 
                     col3.metric(
                         "Campos alterados",
-                        len(grupo[
-                            grupo["tipo_alteracao"] == "CAMPO_ALTERADO"
-                        ])
+                        len(grupo[grupo["tipo_alteracao"] == "CAMPO_ALTERADO"])
                     )
 
                     for _, row in grupo.iterrows():
-
                         tipo = row["tipo_alteracao"]
 
-                        if tipo == "ITEM_REMOVIDO":
+                        if tipo == "CERTIFICADO_NOVO":
+                            st.info(f"📄 Certificado novo: {row['valor_novo']}")
 
+                        elif tipo == "CERTIFICADO_ATUALIZADO":
+                            st.success(f"🔄 Atualizado: {row['valor_antigo']} → {row['valor_novo']}")
+
+                        elif tipo == "REV_IGNORADA":
+                            st.warning(f"⚠️ Revisão ignorada: {row['valor_antigo']} | {row['valor_novo']}")
+
+                        elif tipo == "ITEM_REMOVIDO":
                             st.error(
-                                f"""
-🗑️ ITEM REMOVIDO
-
-Modelo: {row["modelo"]}
-
-Código: {row["codigo"]}
-"""
+                                f"🗑️ ITEM REMOVIDO\n\n"
+                                f"Modelo: {row['modelo']}\n\n"
+                                f"Código: {row['codigo']}\n\n"
+                                f"Antes: {row['valor_antigo']}"
                             )
 
                         elif tipo == "ITEM_NOVO":
-
                             st.success(
-                                f"""
-➕ ITEM NOVO
-
-Modelo: {row["modelo"]}
-
-Código: {row["codigo"]}
-"""
+                                f"➕ ITEM NOVO\n\n"
+                                f"Modelo: {row['modelo']}\n\n"
+                                f"Código: {row['codigo']}\n\n"
+                                f"Novo: {row['valor_novo']}"
                             )
 
                         elif tipo == "CAMPO_ALTERADO":
-
                             st.warning(
-                                f"""
-✏️ CAMPO ALTERADO
-
-Modelo: {row["modelo"]}
-
-Código: {row["codigo"]}
-
-Campo: {row["campo_alterado"]}
-
-ANTES:
-{row["valor_antigo"]}
-
-DEPOIS:
-{row["valor_novo"]}
-"""
+                                f"✏️ CAMPO ALTERADO\n\n"
+                                f"Modelo: {row['modelo']}\n\n"
+                                f"Código: {row['codigo']}\n\n"
+                                f"Campo: {row['campo_alterado']}\n\n"
+                                f"Antes: {row['valor_antigo']}\n\n"
+                                f"Depois: {row['valor_novo']}"
                             )
 
+            st.download_button(
+                "Baixar histórico CSV",
+                historico.to_csv(index=False, sep=";").encode(
+                    "ISO-8859-1",
+                    errors="replace"
+                ),
+                "historico.csv",
+                "text/csv"
+            )
+
 # ==========================================
-# ABA 3
+# ABA 3 - CONSULTAR IP-BRI
 # ==========================================
 
 with aba3:
-
     st.title("Consultar IP-BRI")
 
     busca_ip = st.text_input(
@@ -1132,7 +1261,6 @@ with aba3:
     )
 
     if busca_ip:
-
         itens_ip = pd.read_sql_query("""
         SELECT
             i.marca,
@@ -1153,83 +1281,96 @@ with aba3:
         """, conn, params=(f"%{busca_ip}%",))
 
         if itens_ip.empty:
-
-            st.warning(
-                "Nenhum item encontrado para esse IP-BRI."
-            )
-
+            st.warning("Nenhum item encontrado para esse IP-BRI.")
         else:
-
-            st.success(
-                f"{len(itens_ip)} itens encontrados ✅"
-            )
-
-            st.dataframe(
-                itens_ip,
-                use_container_width=True
-            )
+            st.success(f"{len(itens_ip)} itens encontrados ✅")
+            st.dataframe(itens_ip, use_container_width=True)
 
             st.download_button(
                 "Baixar itens deste IP-BRI em CSV",
-                itens_ip.to_csv(
-                    index=False,
-                    sep=";"
-                ).encode(
+                itens_ip.to_csv(index=False, sep=";").encode(
                     "ISO-8859-1",
                     errors="replace"
                 ),
                 f"{busca_ip.replace('/', '-')}.csv",
                 "text/csv"
             )
+
 # ==========================================
 # ABA 4 - REGISTROS
 # ==========================================
 
-def ler_registros_aba(excel_file, aba):
-    bruto = pd.read_excel(
-        excel_file,
-        sheet_name=aba,
-        header=None
+with aba4:
+    st.title("Registros")
+
+    st.info(
+        "Envie o Excel de registros. Cada aba será tratada como uma fábrica. "
+        "O sistema vai procurar automaticamente as colunas FAMÍLIA e REGISTRO."
     )
 
-    linha_cabecalho = None
-    col_familia = None
-    col_registro = None
+    registro_excel = st.file_uploader(
+        "Envie o Excel de Registros",
+        type=["xlsx", "xls"],
+        key="excel_registros"
+    )
 
-    for i, row in bruto.iterrows():
-        valores = [str(v).strip().upper() for v in row.values]
+    if registro_excel:
+        try:
+            excel = pd.ExcelFile(registro_excel)
+            abas = excel.sheet_names
 
-        for idx, valor in enumerate(valores):
-            if "FAMILIA" in valor or "FAMÍLIA" in valor:
-                linha_cabecalho = i
-                col_familia = idx
+            st.success(f"{len(abas)} abas encontradas ✅")
 
-            if "REGISTRO" in valor:
-                linha_cabecalho = i
-                col_registro = idx
+            todas_fabricas = []
 
-        if linha_cabecalho is not None and col_familia is not None and col_registro is not None:
-            break
+            for aba in abas:
+                df_filtrado = ler_registros_aba(
+                    registro_excel,
+                    aba
+                )
 
-    if linha_cabecalho is None:
-        return None
+                if df_filtrado is None or df_filtrado.empty:
+                    continue
 
-    dados = bruto.iloc[linha_cabecalho + 1:, [col_familia, col_registro]].copy()
+                st.subheader(f"Fábrica: {aba}")
 
-    dados.columns = ["FAMILIA", "REGISTRO"]
+                st.dataframe(
+                    df_filtrado,
+                    use_container_width=True
+                )
 
-    dados = dados.dropna(how="all")
+                todas_fabricas.append(df_filtrado)
 
-    dados["FAMILIA"] = dados["FAMILIA"].astype(str).str.strip()
-    dados["REGISTRO"] = dados["REGISTRO"].astype(str).str.strip()
+            if todas_fabricas:
+                banco_registros = pd.concat(
+                    todas_fabricas,
+                    ignore_index=True
+                )
 
-    dados = dados[
-        (dados["FAMILIA"] != "") &
-        (dados["FAMILIA"].str.lower() != "nan") &
-        (dados["REGISTRO"] != "") &
-        (dados["REGISTRO"].str.lower() != "nan")
-    ]
+                st.divider()
 
-    dados["FABRICA"] = aba
+                st.subheader("Banco Geral de Registros")
 
-    return dados
+                st.dataframe(
+                    banco_registros,
+                    use_container_width=True
+                )
+
+                st.download_button(
+                    "Baixar registros tratados CSV",
+                    banco_registros.to_csv(
+                        index=False,
+                        sep=";"
+                    ).encode(
+                        "ISO-8859-1",
+                        errors="replace"
+                    ),
+                    "registros_tratados.csv",
+                    "text/csv"
+                )
+
+            else:
+                st.warning("Nenhum registro válido encontrado no Excel.")
+
+        except Exception as e:
+            st.error(f"Erro ao ler Excel: {e}")
