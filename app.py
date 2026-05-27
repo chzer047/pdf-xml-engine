@@ -213,11 +213,11 @@ def escape_xml(texto):
 
 
 def verificar_codigos_duplicados(df):
+    if df is None or df.empty or "CODIGO" not in df.columns:
+        return pd.DataFrame()
+
     duplicados = df[
-        df.duplicated(
-            subset=["CODIGO"],
-            keep=False
-        )
+        df.duplicated(subset=["CODIGO"], keep=False)
     ].copy()
 
     if not duplicados.empty:
