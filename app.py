@@ -1110,11 +1110,15 @@ def ler_registros_aba(excel_file, aba):
 
 
 
-def salvar_registros_no_banco(banco_registros, arquivo_nome):
+def salvar_registros_no_banco(banco_registros, arquivo_nome, cliente_base):
     if banco_registros is None or banco_registros.empty:
         return 0
 
-    cursor.execute("DELETE FROM registros")
+    cliente_base = clean(cliente_base).upper()
+
+    # Apaga somente os registros da base atual.
+    # Exemplo: salvar BOLSA não apaga MOHNISH.
+    cursor.execute("DELETE FROM registros WHERE UPPER(cliente_base) = UPPER(?)", (cliente_base,))
 
     total = 0
 
@@ -2194,7 +2198,8 @@ with aba4:
                 if st.button("Salvar registros desta base", key="salvar_registros_base"):
                     total_salvo = salvar_registros_no_banco(
                         banco_registros,
-                        registro_excel.name
+                        registro_excel.name,
+                        cliente_base
                     )
 
                     st.success(f"{total_salvo} registros salvos no banco para a base {cliente_base} ✅")
