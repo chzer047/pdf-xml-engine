@@ -2230,6 +2230,102 @@ def buscar_fabrica_por_codigo_s5(cliente_base, codigo_fabrica):
 
     return resultado.iloc[0].to_dict()
 
+
+def listar_processos_sistema5():
+    return pd.read_sql_query("""
+    SELECT
+        a.id AS arquivo_id,
+        c.categoria,
+        c.cliente_base,
+        f.fabrica,
+        f.ce_bri,
+        f.endereco_fabrica,
+        a.tipo_processo,
+        a.ip_processo,
+        a.data_processo,
+        a.arquivo_nome,
+        COUNT(i.id) AS qtd_itens
+    FROM sistema5_arquivos a
+    INNER JOIN sistema5_clientes c
+    ON c.id = a.cliente_id
+    INNER JOIN sistema5_fabricas f
+    ON f.id = a.fabrica_id
+    LEFT JOIN sistema5_itens i
+    ON i.arquivo_id = a.id
+    GROUP BY
+        a.id,
+        c.categoria,
+        c.cliente_base,
+        f.fabrica,
+        f.ce_bri,
+        f.endereco_fabrica,
+        a.tipo_processo,
+        a.ip_processo,
+        a.data_processo,
+        a.arquivo_nome
+    ORDER BY
+        c.categoria,
+        c.cliente_base,
+        f.fabrica,
+        a.data_processo DESC,
+        a.id DESC
+    """, conn)
+
+
+def buscar_itens_processo_sistema5(arquivo_id, termo=""):
+    termo = clean(termo)
+
+    if termo:
+        return pd.read_sql_query("""
+        SELECT
+            familia,
+            item,
+            marca,
+            modelo,
+            nome,
+            codigo,
+            ce_bri,
+            endereco_fabrica,
+            tipo_processo,
+            ip_processo,
+            data_processo,
+            arquivo_nome
+        FROM sistema5_itens
+        WHERE arquivo_id = ?
+        AND (
+            UPPER(modelo) LIKE UPPER(?)
+            OR UPPER(marca) LIKE UPPER(?)
+            OR UPPER(nome) LIKE UPPER(?)
+            OR codigo LIKE ?
+        )
+        ORDER BY CAST(familia AS INTEGER), CAST(item AS INTEGER), modelo
+        """, conn, params=(
+            arquivo_id,
+            f"{termo}%",
+            f"%{termo}%",
+            f"%{termo}%",
+            f"%{termo}%"
+        ))
+
+    return pd.read_sql_query("""
+    SELECT
+        familia,
+        item,
+        marca,
+        modelo,
+        nome,
+        codigo,
+        ce_bri,
+        endereco_fabrica,
+        tipo_processo,
+        ip_processo,
+        data_processo,
+        arquivo_nome
+    FROM sistema5_itens
+    WHERE arquivo_id = ?
+    ORDER BY CAST(familia AS INTEGER), CAST(item AS INTEGER), modelo
+    """, conn, params=(arquivo_id,))
+
 # ==========================================
 # TABS
 # ==========================================
@@ -2238,6 +2334,9 @@ aviso_backup_diario()
 
 try:
     st.sidebar.header("Backup Geral")
+
+    st.sidebar.caption("Backup centralizado: baixar e restaurar tudo pelo mesmo local.")
+
     st.sidebar.download_button(
         "⬇️ BAIXAR BACKUP GERAL ZIP",
         gerar_backup_geral_zip(),
@@ -2245,6 +2344,24 @@ try:
         "application/zip",
         key="backup_geral_sidebar"
     )
+
+    st.sidebar.divider()
+
+    st.sidebar.subheader("Restaurar backup")
+
+    backup_geral_upload = st.sidebar.file_uploader(
+        "Enviar certificados.db",
+        type=["db"],
+        key="backup_geral_upload_sidebar"
+    )
+
+    if backup_geral_upload:
+        with open(DB_PATH, "wb") as f:
+            f.write(backup_geral_upload.read())
+
+        st.sidebar.success("Backup restaurado com sucesso.")
+        st.sidebar.warning("Recarregue o app para aplicar o banco restaurado.")
+
 except Exception as e:
     st.sidebar.warning(f"Backup geral indisponível: {e}")
 
@@ -3414,16 +3531,16 @@ with aba6:
     st.divider()
     st.subheader("Estrutura salva no Sistema 5")
 
-    resumo_s5 = listar_sistema5_resumo()
+    processos_s5 = listar_processos_sistema5()
 
-    if resumo_s5.empty:
+    if processos_s5.empty:
         st.info("Nenhum processo salvo ainda.")
     else:
-        categorias = resumo_s5["categoria"].dropna().unique().tolist()
+        categorias = processos_s5["categoria"].dropna().unique().tolist()
 
         for categoria in categorias:
             with st.expander(f"📁 {categoria}", expanded=False):
-                bloco_categoria = resumo_s5[resumo_s5["categoria"] == categoria]
+                bloco_categoria = processos_s5[processos_s5["categoria"] == categoria]
                 clientes = bloco_categoria["cliente_base"].dropna().unique().tolist()
 
                 for cliente in clientes:
@@ -3434,11 +3551,60 @@ with aba6:
                     for fabrica in fabricas:
                         with st.expander(f"🏭 {fabrica}", expanded=False):
                             bloco_fabrica = bloco_cliente[bloco_cliente["fabrica"] == fabrica]
-                            st.dataframe(bloco_fabrica, use_container_width=True)
+
+                            st.caption("Processos salvos nesta fábrica")
+
+                            for _, proc in bloco_fabrica.iterrows():
+                                arquivo_id = int(proc["arquivo_id"])
+                                titulo_processo = (
+                                    f"📄 {proc.get('tipo_processo', '')} | "
+                                    f"{proc.get('ip_processo', '')} | "
+                                    f"{proc.get('data_processo', '')} | "
+                                    f"{proc.get('arquivo_nome', '')} | "
+                                    f"{int(proc.get('qtd_itens', 0) or 0)} itens"
+                                )
+
+                                with st.expander(titulo_processo, expanded=False):
+                                    colp1, colp2, colp3 = st.columns(3)
+
+                                    colp1.metric("IP", proc.get("ip_processo", ""))
+                                    colp2.metric("Tipo", proc.get("tipo_processo", ""))
+                                    colp3.metric("Itens", int(proc.get("qtd_itens", 0) or 0))
+
+                                    st.caption(f"CE-BRI: {proc.get('ce_bri', '')}")
+                                    st.caption(f"Endereço: {proc.get('endereco_fabrica', '')}")
+
+                                    termo_item_processo = st.text_input(
+                                        "Pesquisar item dentro deste processo",
+                                        placeholder="Digite modelo, marca, descrição ou código",
+                                        key=f"pesquisar_item_processo_{arquivo_id}"
+                                    )
+
+                                    itens_do_processo = buscar_itens_processo_sistema5(
+                                        arquivo_id,
+                                        termo_item_processo
+                                    )
+
+                                    if itens_do_processo.empty:
+                                        st.warning("Nenhum item encontrado dentro deste processo.")
+                                    else:
+                                        st.success(f"{len(itens_do_processo)} item(ns) encontrado(s) neste processo ✅")
+                                        st.dataframe(itens_do_processo, use_container_width=True)
+
+                                        st.download_button(
+                                            "Baixar itens deste processo CSV",
+                                            itens_do_processo.to_csv(index=False, sep=";").encode(
+                                                "ISO-8859-1",
+                                                errors="replace"
+                                            ),
+                                            f"sistema5_processo_{arquivo_id}.csv",
+                                            "text/csv",
+                                            key=f"download_itens_processo_{arquivo_id}"
+                                        )
 
         st.download_button(
             "Baixar resumo Sistema 5 CSV",
-            resumo_s5.to_csv(index=False, sep=";").encode("ISO-8859-1", errors="replace"),
+            processos_s5.to_csv(index=False, sep=";").encode("ISO-8859-1", errors="replace"),
             "sistema5_resumo.csv",
             "text/csv",
             key="download_sistema5_resumo"
