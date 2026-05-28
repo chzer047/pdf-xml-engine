@@ -1531,6 +1531,67 @@ def atualizar_endereco_fabrica_existente(cliente_base, fabrica, novo_endereco):
     return cursor.rowcount
 
 
+
+
+# ==========================================
+# PESQUISA AVANÇADA
+# ==========================================
+
+def pesquisar_por_ip_bri(ip_bri_busca):
+    termo = clean(ip_bri_busca).upper()
+
+    if not termo:
+        return pd.DataFrame()
+
+    return pd.read_sql_query("""
+    SELECT DISTINCT
+        c.ip_bri AS ip_bri,
+        c.ce_bri AS ce_bri,
+        c.familia AS fam,
+        r.registro AS registro,
+        r.fabrica AS fabrica,
+        r.endereco_fabrica AS endereco,
+        c.rev AS rev,
+        c.produto AS produto,
+        c.data_emissao AS data_emissao
+    FROM certificados c
+    LEFT JOIN registros r
+    ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
+    AND r.familia = c.familia
+    WHERE UPPER(c.ip_bri) LIKE ?
+       OR REPLACE(UPPER(c.ip_bri), 'IP-BRI-', '') LIKE ?
+    ORDER BY c.ip_bri, r.fabrica, r.registro
+    """, conn, params=(f"%{termo}%", f"%{termo.replace('IP-BRI-', '')}%"))
+
+
+def pesquisar_por_registro(registro_busca):
+    termo = clean(registro_busca)
+
+    if not termo:
+        return pd.DataFrame()
+
+    return pd.read_sql_query("""
+    SELECT DISTINCT
+        r.registro AS registro,
+        c.ip_bri AS ip_bri,
+        c.ce_bri AS ce_bri,
+        c.familia AS fam,
+        r.fabrica AS fabrica,
+        r.endereco_fabrica AS endereco,
+        i.marca AS fabricante,
+        c.rev AS rev,
+        c.produto AS produto,
+        c.data_emissao AS data_emissao
+    FROM registros r
+    LEFT JOIN certificados c
+    ON UPPER(c.ce_bri) = UPPER(r.ce_bri)
+    AND c.familia = r.familia
+    LEFT JOIN itens i
+    ON i.certificado_id = c.id
+    WHERE r.registro LIKE ?
+    ORDER BY r.registro, c.ip_bri, i.marca
+    """, conn, params=(f"%{termo}%",))
+
 # ==========================================
 # TABS
 # ==========================================
@@ -1552,9 +1613,9 @@ except Exception as e:
 aba1, aba2, aba3, aba4, aba5 = st.tabs([
     "PDF → XML",
     "Banco de Certificados",
-    "Consultar IP-BRI",
     "Registros",
-    "Preenchimento de Confirmação"
+    "Preenchimento de Confirmação",
+    "Pesquisa Avançada"
 ])
 
 # ==========================================
@@ -2082,91 +2143,10 @@ with aba2:
             )
 
 # ==========================================
-# ABA 3 - CONSULTAR IP-BRI
+# ABA 3 - REGISTROS
 # ==========================================
 
 with aba3:
-    st.title("Consultar IP-BRI")
-
-    busca_ip = st.text_input(
-        "Digite o IP-BRI que deseja consultar",
-        key="consulta_ip_bri_aba3"
-    )
-
-    if busca_ip:
-        busca_limpa = clean(busca_ip).upper()
-
-        # Busca flexível: aceita IP completo ou parte dele.
-        # Exemplo: 0779/2025-23, IP-BRI-0779/2025-23, 2025-23 etc.
-        itens_ip = pd.read_sql_query("""
-        SELECT
-            i.marca AS marca,
-            i.modelo AS modelo,
-            i.nome AS nome,
-            i.codigo AS codigo,
-            c.ip_bri AS ip_bri,
-            c.ce_bri AS ce_bri,
-            r.registro AS registro,
-            c.familia AS fam,
-            r.fabrica AS fabrica,
-            c.rev AS rev,
-            c.produto AS produto,
-            c.data_emissao AS data_emissao,
-            i.ordem AS ordem
-        FROM itens i
-        INNER JOIN certificados c
-        ON c.id = i.certificado_id
-        LEFT JOIN registros r
-        ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
-        AND r.familia = c.familia
-        WHERE UPPER(c.ip_bri) LIKE ?
-        OR REPLACE(UPPER(c.ip_bri), 'IP-BRI-', '') LIKE ?
-        ORDER BY i.marca, i.modelo, i.ordem
-        """, conn, params=(f"%{busca_limpa}%", f"%{busca_limpa.replace('IP-BRI-', '')}%"))
-
-        if itens_ip.empty:
-            st.warning("Nenhum item encontrado para esse IP-BRI.")
-
-            certificados_encontrados = pd.read_sql_query("""
-            SELECT
-                id,
-                ip_bri,
-                ce_bri,
-                rev,
-                produto,
-                data_emissao,
-                arquivo_pdf,
-                data_cadastro,
-                data_atualizacao
-            FROM certificados
-            WHERE UPPER(ip_bri) LIKE ?
-            OR REPLACE(UPPER(ip_bri), 'IP-BRI-', '') LIKE ?
-            ORDER BY ip_bri
-            """, conn, params=(f"%{busca_limpa}%", f"%{busca_limpa.replace('IP-BRI-', '')}%"))
-
-            if not certificados_encontrados.empty:
-                st.info("O certificado existe no banco, mas não possui itens vinculados.")
-                st.dataframe(certificados_encontrados, use_container_width=True)
-
-        else:
-            st.success(f"{len(itens_ip)} itens encontrados ✅")
-            st.dataframe(itens_ip, use_container_width=True)
-
-            st.download_button(
-                "Baixar itens deste IP-BRI em CSV",
-                itens_ip.to_csv(index=False, sep=";").encode(
-                    "ISO-8859-1",
-                    errors="replace"
-                ),
-                f"{busca_limpa.replace('/', '-')}.csv",
-                "text/csv"
-            )
-
-# ==========================================
-# ABA 4 - REGISTROS
-# ==========================================
-
-with aba4:
     st.title("Registros")
 
     st.subheader("Enviar Excel de Registros")
@@ -2472,10 +2452,10 @@ with aba4:
 
 
 # ==========================================
-# ABA 5 - PREENCHIMENTO DE CONFIRMAÇÃO
+# ABA 4 - PREENCHIMENTO DE CONFIRMAÇÃO
 # ==========================================
 
-with aba5:
+with aba4:
     st.title("Preenchimento de Confirmação")
 
     st.info(
@@ -2514,3 +2494,80 @@ with aba5:
 
         except Exception as e:
             st.error(f"Erro ao preencher Excel: {e}")
+
+
+# ==========================================
+# ABA 5 - PESQUISA AVANÇADA
+# ==========================================
+
+with aba5:
+    st.title("Pesquisa Avançada")
+
+    st.info(
+        "Use esta aba para cruzar IP-BRI, registro, fábrica e endereço. "
+        "Você pode pesquisar pelo IP-BRI para descobrir o registro, ou pesquisar pelo registro para descobrir o IP-BRI."
+    )
+
+    tipo_pesquisa_avancada = st.radio(
+        "O que você quer pesquisar?",
+        [
+            "Quero saber o REGISTRO de um IP-BRI",
+            "Quero saber o IP-BRI de um REGISTRO"
+        ],
+        key="tipo_pesquisa_avancada"
+    )
+
+    if tipo_pesquisa_avancada == "Quero saber o REGISTRO de um IP-BRI":
+        ip_pesquisa = st.text_input(
+            "Digite o IP-BRI",
+            placeholder="Ex: IP-BRI-0533/2023-15 ou 0533/2023-15",
+            key="pesquisa_avancada_ip"
+        )
+
+        if ip_pesquisa:
+            resultado_ip = pesquisar_por_ip_bri(ip_pesquisa)
+
+            if resultado_ip.empty:
+                st.warning("Nenhum registro encontrado para este IP-BRI.")
+            else:
+                st.success(f"{len(resultado_ip)} resultado(s) encontrado(s) ✅")
+                st.dataframe(resultado_ip, use_container_width=True)
+
+                st.download_button(
+                    "Baixar resultado em CSV",
+                    resultado_ip.to_csv(index=False, sep=";").encode(
+                        "ISO-8859-1",
+                        errors="replace"
+                    ),
+                    "pesquisa_por_ip_bri.csv",
+                    "text/csv",
+                    key="download_pesquisa_ip_bri"
+                )
+
+    else:
+        registro_pesquisa = st.text_input(
+            "Digite o REGISTRO",
+            placeholder="Ex: 003889/2023",
+            key="pesquisa_avancada_registro"
+        )
+
+        if registro_pesquisa:
+            resultado_registro = pesquisar_por_registro(registro_pesquisa)
+
+            if resultado_registro.empty:
+                st.warning("Nenhum IP-BRI encontrado para este registro.")
+            else:
+                st.success(f"{len(resultado_registro)} resultado(s) encontrado(s) ✅")
+                st.dataframe(resultado_registro, use_container_width=True)
+
+                st.download_button(
+                    "Baixar resultado em CSV",
+                    resultado_registro.to_csv(index=False, sep=";").encode(
+                        "ISO-8859-1",
+                        errors="replace"
+                    ),
+                    "pesquisa_por_registro.csv",
+                    "text/csv",
+                    key="download_pesquisa_registro"
+                )
+
