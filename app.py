@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS registros (
     ce_bri TEXT,
     familia TEXT,
     registro TEXT,
+    endereco_fabrica TEXT,
     arquivo_excel TEXT,
     data_cadastro TEXT
 )
@@ -113,6 +114,7 @@ for tabela, coluna, tipo in [
     ("registros", "ce_bri", "TEXT"),
     ("registros", "familia", "TEXT"),
     ("registros", "registro", "TEXT"),
+    ("registros", "endereco_fabrica", "TEXT"),
     ("registros", "fabrica", "TEXT"),
     ("registros", "arquivo_excel", "TEXT"),
     ("registros", "data_cadastro", "TEXT"),
@@ -616,6 +618,7 @@ def garantir_estrutura_banco():
         ("registros", "ce_bri", "TEXT"),
         ("registros", "familia", "TEXT"),
         ("registros", "registro", "TEXT"),
+        ("registros", "endereco_fabrica", "TEXT"),
         ("registros", "fabrica", "TEXT"),
         ("registros", "arquivo_excel", "TEXT"),
         ("registros", "data_cadastro", "TEXT"),
@@ -1110,11 +1113,12 @@ def ler_registros_aba(excel_file, aba):
 
 
 
-def salvar_registros_no_banco(banco_registros, arquivo_nome, cliente_base):
+def salvar_registros_no_banco(banco_registros, arquivo_nome, cliente_base, enderecos_fabricas=None):
     if banco_registros is None or banco_registros.empty:
         return 0
 
     cliente_base = clean(cliente_base).upper()
+    enderecos_fabricas = enderecos_fabricas or {}
 
     # Apaga somente os registros da base atual.
     # Exemplo: salvar BOLSA não apaga MOHNISH.
@@ -1123,6 +1127,9 @@ def salvar_registros_no_banco(banco_registros, arquivo_nome, cliente_base):
     total = 0
 
     for _, r in banco_registros.iterrows():
+        fabrica = r.get("FABRICA", "")
+        endereco = enderecos_fabricas.get(str(fabrica), "")
+
         cursor.execute("""
         INSERT INTO registros (
             cliente_base,
@@ -1130,16 +1137,18 @@ def salvar_registros_no_banco(banco_registros, arquivo_nome, cliente_base):
             ce_bri,
             familia,
             registro,
+            endereco_fabrica,
             arquivo_excel,
             data_cadastro
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             cliente_base,
-            r.get("FABRICA", ""),
+            fabrica,
             r.get("CE_BRI", ""),
             str(r.get("FAMILIA", "")),
             r.get("REGISTRO", ""),
+            endereco,
             arquivo_nome,
             datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         ))
@@ -1147,7 +1156,6 @@ def salvar_registros_no_banco(banco_registros, arquivo_nome, cliente_base):
 
     conn.commit()
     return total
-
 
 
 def exportar_registros_banco():
@@ -1158,6 +1166,7 @@ def exportar_registros_banco():
         ce_bri,
         familia,
         registro,
+        endereco_fabrica,
         arquivo_excel,
         data_cadastro
     FROM registros
@@ -1176,6 +1185,7 @@ def buscar_registro_por_certificado(ce_bri, familia):
         ce_bri,
         familia,
         registro,
+        endereco_fabrica,
         arquivo_excel,
         data_cadastro
     FROM registros
@@ -1361,7 +1371,15 @@ def normalizar_cabecalho(valor):
     texto = texto.replace("CÓD.", "CODIGO")
     texto = texto.replace("IP-BRI", "IP_BRI")
     texto = texto.replace("CE-BRI", "CE_BRI")
+    texto = texto.replace("ENDEREÇO", "ENDERECO")
+    texto = texto.replace("END.", "ENDERECO")
+    texto = texto.replace("ENDERECO_DA_FABRICA", "ENDERECO")
+    texto = texto.replace("ENDEREÇO_DA_FABRICA", "ENDERECO")
+    texto = texto.replace("ENDERECO_FABRICA", "ENDERECO")
+    texto = texto.replace("ENDEREÇO_FABRICA", "ENDERECO")
     texto = texto.replace(" ", "_")
+    texto = texto.replace("ENDERECO_DA_FABRICA", "ENDERECO")
+    texto = texto.replace("ENDERECO_FABRICA", "ENDERECO")
     return texto
 
 
@@ -1372,6 +1390,11 @@ def buscar_item_confirmacao(valor_ref):
     if not ref:
         return None
 
+    # REGRA OFICIAL:
+    # QUALQUER célula verde é uma referência.
+    # Não precisa existir coluna chamada REF.
+    # O valor da célula verde será buscado SOMENTE no campo MODELO do banco.
+    # Não busca por código de barras, nome, marca ou aproximação.
     resultado = pd.read_sql_query("""
     SELECT
         i.marca AS MARCA,
@@ -1380,7 +1403,8 @@ def buscar_item_confirmacao(valor_ref):
         i.codigo AS CODIGO,
         c.ip_bri AS IP_BRI,
         c.ce_bri AS CE_BRI,
-        r.registro AS REGISTRO
+        r.registro AS REGISTRO,
+        r.endereco_fabrica AS ENDERECO
     FROM itens i
     INNER JOIN certificados c
     ON c.id = i.certificado_id
@@ -1388,10 +1412,9 @@ def buscar_item_confirmacao(valor_ref):
     ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
     AND r.familia = c.familia
     WHERE UPPER(TRIM(i.modelo)) = UPPER(TRIM(?))
-       OR UPPER(TRIM(i.modelo)) LIKE UPPER(TRIM(?) || '%')
     ORDER BY c.rev DESC, c.ip_bri DESC
     LIMIT 1
-    """, conn, params=(ref, ref))
+    """, conn, params=(ref,))
 
     if resultado.empty:
         return None
@@ -1405,7 +1428,7 @@ def descobrir_cabecalho_coluna(ws, row_idx, col_idx):
         cell = ws.cell(r, col_idx)
         valor = clean(cell.value)
 
-        if valor and (eh_azul(cell) or normalizar_cabecalho(valor) in ["MARCA", "MODELO", "NOME", "CODIGO", "IP_BRI", "CE_BRI", "REGISTRO"]):
+        if valor and (eh_azul(cell) or normalizar_cabecalho(valor) in ["MARCA", "MODELO", "NOME", "CODIGO", "IP_BRI", "CE_BRI", "REGISTRO", "ENDERECO"]):
             return normalizar_cabecalho(valor)
 
     # Plano B: procura qualquer texto de cabeçalho acima
@@ -1413,7 +1436,7 @@ def descobrir_cabecalho_coluna(ws, row_idx, col_idx):
         valor = clean(ws.cell(r, col_idx).value)
         cab = normalizar_cabecalho(valor)
 
-        if cab in ["MARCA", "MODELO", "NOME", "CODIGO", "IP_BRI", "CE_BRI", "REGISTRO"]:
+        if cab in ["MARCA", "MODELO", "NOME", "CODIGO", "IP_BRI", "CE_BRI", "REGISTRO", "ENDERECO"]:
             return cab
 
     return ""
@@ -1426,7 +1449,7 @@ def preencher_excel_confirmacao(uploaded_file):
     preenchidos = 0
     nao_encontrados = []
 
-    campos_validos = ["MARCA", "MODELO", "NOME", "CODIGO", "IP_BRI", "CE_BRI", "REGISTRO"]
+    campos_validos = ["MARCA", "MODELO", "NOME", "CODIGO", "IP_BRI", "CE_BRI", "REGISTRO", "ENDERECO"]
 
     for ws in wb.worksheets:
         for row in ws.iter_rows():
@@ -2152,6 +2175,7 @@ with aba4:
             st.caption("Se quiser, altere o nome de cada fábrica antes de salvar. Exemplo: F01 - MOHNISH / CE-BRI-XXXX")
 
             nomes_fabricas = {}
+            enderecos_fabricas_por_aba = {}
 
             for aba in abas:
                 nome_sugerido = str(aba)
@@ -2160,6 +2184,13 @@ with aba4:
                     f"Nome da fábrica para a aba: {aba}",
                     value=nome_sugerido,
                     key=f"nome_fabrica_{cliente_base}_{aba}"
+                )
+
+                enderecos_fabricas_por_aba[aba] = st.text_area(
+                    f"Endereço da fábrica para a aba: {aba}",
+                    value="",
+                    key=f"endereco_fabrica_{cliente_base}_{aba}",
+                    height=80
                 )
 
             todas_fabricas = []
@@ -2174,9 +2205,11 @@ with aba4:
                     continue
 
                 nome_final_fabrica = clean(nomes_fabricas.get(aba, aba)) or str(aba)
+                endereco_final_fabrica = clean(enderecos_fabricas_por_aba.get(aba, ""))
 
                 # Mantém o CE-BRI extraído da aba original, mas salva a fábrica com o nome escolhido.
                 df_filtrado["FABRICA"] = nome_final_fabrica
+                df_filtrado["ENDERECO_FABRICA"] = endereco_final_fabrica
 
                 st.subheader(f"Prévia: {cliente_base} → {nome_final_fabrica}")
 
@@ -2203,10 +2236,16 @@ with aba4:
                 )
 
                 if st.button("Salvar registros desta base", key="salvar_registros_base"):
+                    enderecos_para_salvar = {}
+                    if "ENDERECO_FABRICA" in banco_registros.columns:
+                        for _, linha_endereco in banco_registros.drop_duplicates(subset=["FABRICA"]).iterrows():
+                            enderecos_para_salvar[str(linha_endereco.get("FABRICA", ""))] = clean(linha_endereco.get("ENDERECO_FABRICA", ""))
+
                     total_salvo = salvar_registros_no_banco(
                         banco_registros,
                         registro_excel.name,
-                        cliente_base
+                        cliente_base,
+                        enderecos_para_salvar
                     )
 
                     st.success(f"{total_salvo} registros salvos no banco para a base {cliente_base} ✅")
@@ -2300,7 +2339,8 @@ with aba4:
             fabrica,
             ce_bri,
             familia,
-            registro
+            registro,
+            endereco_fabrica
         FROM registros
         WHERE cliente_base = ?
         ORDER BY fabrica, CAST(familia AS INTEGER)
@@ -2318,7 +2358,8 @@ with aba4:
                     bloco[[
                         "familia",
                         "registro",
-                        "ce_bri"
+                        "ce_bri",
+                        "endereco_fabrica"
                     ]],
                     use_container_width=True
                 )
