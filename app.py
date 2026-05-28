@@ -1772,8 +1772,15 @@ def normalizar_coluna_excel_s5(valor):
     for antigo, novo in troca.items():
         txt = txt.replace(antigo, novo)
 
-    # Limpa espaços duplicados
     txt = re.sub(r"\s+", " ", txt).strip()
+
+    # Ignora colunas auxiliares que citam "modelo", mas não são referência.
+    if "APLICAVEL SOMENTE" in txt or "QUANTIDADE" in txt or "NCM" in txt:
+        return txt
+
+    # Item
+    if txt == "ITEM" or txt.startswith("ITEM "):
+        return "ITEM"
 
     # Códigos
     if (
@@ -1786,16 +1793,22 @@ def normalizar_coluna_excel_s5(valor):
         return "CODIGO"
 
     # Modelo / Referência
+    # IMPORTANTE:
+    # Não pode reconhecer qualquer texto com "MODELO",
+    # porque existe coluna "Quantidade aplicável somente para o modelo 1b".
     if (
-        "MODELO" in txt
-        or "REFERENCIA" in txt
+        txt.startswith("MODELO")
+        or txt.startswith("REFERENCIA")
+        or "MODELO / REFERENCIA" in txt
+        or "MODELO/REFERENCIA" in txt
         or "DESIGNACAO COMERCIAL" in txt
     ):
         return "MODELO"
 
     # Marca
     if (
-        "MARCA" in txt
+        txt == "MARCA"
+        or txt.startswith("MARCA ")
         or "MARCA COMERCIALIZADA" in txt
         or "FABRICANTE" in txt
     ):
@@ -1805,15 +1818,11 @@ def normalizar_coluna_excel_s5(valor):
     if (
         "DESCRICAO TECNICA" in txt
         or "DESCRICAO TECNICA DO MODELO" in txt
-        or "DESCRICAO" in txt
-        or "NOME" in txt
+        or txt.startswith("DESCRICAO")
+        or txt == "NOME"
         or "PROCESSO PRODUTIVO" in txt
     ):
         return "NOME"
-
-    # Item
-    if txt == "ITEM" or txt.startswith("ITEM "):
-        return "ITEM"
 
     return txt
 
