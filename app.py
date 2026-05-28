@@ -151,6 +151,8 @@ CREATE TABLE IF NOT EXISTS sistema5_itens (
     tipo_processo TEXT,
     ip_processo TEXT,
     data_processo TEXT,
+    familia TEXT,
+    item TEXT,
     marca TEXT,
     modelo TEXT,
     nome TEXT,
@@ -189,6 +191,8 @@ for tabela, coluna, tipo in [
     ("itens", "modelo", "TEXT"),
     ("itens", "nome", "TEXT"),
     ("itens", "codigo", "TEXT"),
+    ("sistema5_itens", "familia", "TEXT"),
+    ("sistema5_itens", "item", "TEXT"),
 ]:
     try:
         cursor.execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {tipo}")
@@ -1487,7 +1491,7 @@ def descobrir_cabecalho_coluna(ws, row_idx, col_idx):
         cell = ws.cell(r, col_idx)
         valor = clean(cell.value)
 
-        if valor and (eh_azul(cell) or normalizar_cabecalho(valor) in ["MARCA", "MODELO", "NOME", "CODIGO", "IP_BRI", "CE_BRI", "REGISTRO", "ENDERECO"]):
+        if valor and (eh_azul(cell) or normalizar_cabecalho(valor) in ["MARCA", "MODELO", "NOME", "CODIGO", "IP_BRI", "CE_BRI", "REGISTRO", "ENDERECO", "FAMILIA", "ITEM", "TIPO_PROCESSO", "DATA_PROCESSO", "ARQUIVO_ORIGEM"]):
             return normalizar_cabecalho(valor)
 
     # Plano B: procura qualquer texto de cabeçalho acima
@@ -1495,7 +1499,7 @@ def descobrir_cabecalho_coluna(ws, row_idx, col_idx):
         valor = clean(ws.cell(r, col_idx).value)
         cab = normalizar_cabecalho(valor)
 
-        if cab in ["MARCA", "MODELO", "NOME", "CODIGO", "IP_BRI", "CE_BRI", "REGISTRO", "ENDERECO"]:
+        if cab in ["MARCA", "MODELO", "NOME", "CODIGO", "IP_BRI", "CE_BRI", "REGISTRO", "ENDERECO", "FAMILIA", "ITEM", "TIPO_PROCESSO", "DATA_PROCESSO", "ARQUIVO_ORIGEM"]:
             return cab
 
     return ""
@@ -1508,7 +1512,7 @@ def preencher_excel_confirmacao(uploaded_file):
     preenchidos = 0
     nao_encontrados = []
 
-    campos_validos = ["MARCA", "MODELO", "NOME", "CODIGO", "IP_BRI", "CE_BRI", "REGISTRO", "ENDERECO"]
+    campos_validos = ["MARCA", "MODELO", "NOME", "CODIGO", "IP_BRI", "CE_BRI", "REGISTRO", "ENDERECO", "FAMILIA", "ITEM", "TIPO_PROCESSO", "DATA_PROCESSO", "ARQUIVO_ORIGEM"]
 
     for ws in wb.worksheets:
         for row in ws.iter_rows():
@@ -1767,53 +1771,159 @@ def normalizar_coluna_excel_s5(valor):
     txt = txt.replace("COD DE BARRAS", "CODIGO")
     txt = txt.replace("CÓDIGO DE BARRAS", "CODIGO")
     txt = txt.replace("CODIGO DE BARRAS", "CODIGO")
+    txt = txt.replace("CÓDIGO BARRAS", "CODIGO")
+    txt = txt.replace("CODIGO BARRAS", "CODIGO")
+    txt = txt.replace("DESCRIÇÃO TÉCNICA", "NOME")
+    txt = txt.replace("DESCRICAO TECNICA", "NOME")
+    txt = txt.replace("DESCRIÇÃO TECNICA", "NOME")
+    txt = txt.replace("DESCRICAO TÉCNICA", "NOME")
+    txt = txt.replace("ITEM.", "ITEM")
     return txt
 
 
 def ler_excel_inclusao_sistema5(uploaded_file):
-    bruto = pd.read_excel(uploaded_file, header=None, dtype=object)
-    header_idx = None
-    colunas = {}
+    """
+    Leitor específico do Sistema 5.
 
-    for i, row in bruto.iterrows():
-        normalizadas = [normalizar_coluna_excel_s5(v) for v in row.values]
-        achou_modelo = False
+    Estrutura esperada:
+    - O Excel pode ter várias abas.
+    - Cada aba representa uma família.
+    - Dentro de cada aba existem as colunas:
+      ITEM, MODELO, MARCA, CÓDIGO DE BARRAS, DESCRIÇÃO TÉCNICA.
 
-        for idx, nome in enumerate(normalizadas):
-            if nome == "MARCA":
-                colunas["MARCA"] = idx
-            elif nome == "MODELO" or "MODELO" in nome:
-                colunas["MODELO"] = idx
-                achou_modelo = True
-            elif nome == "NOME" or "DESCRI" in nome:
-                colunas["NOME"] = idx
-            elif nome == "CODIGO" or "BARRAS" in nome:
-                colunas["CODIGO"] = idx
+    Regras:
+    - Só considera linha real se tiver MODELO + MARCA + CÓDIGO + DESCRIÇÃO.
+    - Ignora observações, assinaturas, local/data, rodapé e linhas soltas.
+    """
 
-        if achou_modelo:
-            header_idx = i
-            break
-
-    if header_idx is None:
+    try:
+        excel = pd.ExcelFile(uploaded_file)
+    except Exception:
         return pd.DataFrame()
 
-    linhas = []
+    todos_itens = []
 
-    for j in range(header_idx + 1, len(bruto)):
-        row = bruto.iloc[j]
-        modelo = clean(row.iloc[colunas["MODELO"]]) if "MODELO" in colunas and colunas["MODELO"] < len(row) else ""
-
-        if not modelo:
+    for aba in excel.sheet_names:
+        try:
+            bruto = pd.read_excel(
+                uploaded_file,
+                sheet_name=aba,
+                header=None,
+                dtype=object
+            )
+        except Exception:
             continue
 
-        marca = clean(row.iloc[colunas["MARCA"]]) if "MARCA" in colunas and colunas["MARCA"] < len(row) else ""
-        nome = clean(row.iloc[colunas["NOME"]]) if "NOME" in colunas and colunas["NOME"] < len(row) else ""
-        codigo_raw = clean(row.iloc[colunas["CODIGO"]]) if "CODIGO" in colunas and colunas["CODIGO"] < len(row) else ""
-        codigo = extrair_codigo_unico(codigo_raw) or codigo_raw
+        if bruto.empty:
+            continue
 
-        linhas.append({"MARCA": marca, "MODELO": modelo, "NOME": nome, "CODIGO": codigo})
+        header_idx = None
+        colunas = {}
 
-    return pd.DataFrame(linhas)
+        for i, row in bruto.iterrows():
+            normalizadas = [normalizar_coluna_excel_s5(v) for v in row.values]
+            temp = {}
+
+            for idx, nome in enumerate(normalizadas):
+                if nome == "ITEM" or nome.startswith("ITEM"):
+                    temp["ITEM"] = idx
+
+                elif nome == "MODELO" or "MODELO" in nome:
+                    temp["MODELO"] = idx
+
+                elif nome == "MARCA" or "MARCA" in nome:
+                    temp["MARCA"] = idx
+
+                elif (
+                    nome == "CODIGO"
+                    or "CODIGO" in nome
+                    or "BARRAS" in nome
+                    or "CÓDIGO" in nome
+                ):
+                    temp["CODIGO"] = idx
+
+                elif (
+                    nome == "NOME"
+                    or "DESCRICAO" in nome
+                    or "DESCRIÇÃO" in nome
+                    or "TECNICA" in nome
+                    or "TÉCNICA" in nome
+                ):
+                    temp["NOME"] = idx
+
+            if all(campo in temp for campo in ["MODELO", "MARCA", "CODIGO", "NOME"]):
+                header_idx = i
+                colunas = temp
+                break
+
+        if header_idx is None:
+            continue
+
+        for j in range(header_idx + 1, len(bruto)):
+            row = bruto.iloc[j]
+
+            def valor_coluna(nome_coluna):
+                idx = colunas.get(nome_coluna)
+                if idx is None or idx >= len(row):
+                    return ""
+                return clean(row.iloc[idx])
+
+            item = valor_coluna("ITEM")
+            modelo = valor_coluna("MODELO")
+            marca = valor_coluna("MARCA")
+            codigo_raw = valor_coluna("CODIGO")
+            nome = valor_coluna("NOME")
+
+            codigo = extrair_codigo_unico(codigo_raw) or re.sub(r"\\D", "", codigo_raw)
+
+            linha_texto = " ".join([modelo, marca, codigo_raw, nome]).upper()
+
+            palavras_ignorar = [
+                "OBS",
+                "OBSERVAÇÃO",
+                "OBSERVACAO",
+                "LOCAL E DATA",
+                "PLACE AND DATE",
+                "ASSINATURA",
+                "SIGNATURE",
+                "RESPONSÁVEL",
+                "RESPONSAVEL",
+                "APROVAÇÃO",
+                "APROVACAO"
+            ]
+
+            if any(p in linha_texto for p in palavras_ignorar):
+                continue
+
+            if not modelo or not marca or not codigo or not nome:
+                continue
+
+            if normalizar_coluna_excel_s5(modelo) == "MODELO":
+                continue
+
+            if normalizar_coluna_excel_s5(marca) == "MARCA":
+                continue
+
+            todos_itens.append({
+                "FAMILIA": str(aba),
+                "ITEM": item,
+                "MARCA": marca,
+                "MODELO": modelo,
+                "NOME": nome,
+                "CODIGO": codigo
+            })
+
+    if not todos_itens:
+        return pd.DataFrame()
+
+    df_final = pd.DataFrame(todos_itens)
+
+    df_final = df_final.drop_duplicates(
+        subset=["FAMILIA", "MODELO", "CODIGO"],
+        keep="first"
+    )
+
+    return df_final
 
 
 def salvar_inclusao_sistema5(categoria, cliente_base, fabrica, ce_bri, endereco_fabrica, tipo_processo, ip_processo, data_processo, arquivo_nome, df_itens):
@@ -1851,10 +1961,10 @@ def salvar_inclusao_sistema5(categoria, cliente_base, fabrica, ce_bri, endereco_
         cursor.execute("""
         INSERT INTO sistema5_itens (
             arquivo_id, cliente_base, categoria, fabrica, ce_bri, endereco_fabrica,
-            tipo_processo, ip_processo, data_processo, marca, modelo, nome, codigo,
+            tipo_processo, ip_processo, data_processo, familia, item, marca, modelo, nome, codigo,
             arquivo_nome, data_upload
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             arquivo_id,
             cliente_base,
@@ -1865,6 +1975,8 @@ def salvar_inclusao_sistema5(categoria, cliente_base, fabrica, ce_bri, endereco_
             tipo_processo,
             ip_processo,
             data_processo,
+            clean(r.get("FAMILIA", "")),
+            clean(r.get("ITEM", "")),
             clean(r.get("MARCA", "")),
             clean(r.get("MODELO", "")),
             clean(r.get("NOME", "")),
@@ -1897,6 +2009,7 @@ def buscar_item_sistema5_confirmacao(valor_ref):
         fabrica AS FABRICA,
         tipo_processo AS TIPO_PROCESSO,
         data_processo AS DATA_PROCESSO,
+        familia AS FAMILIA,
         arquivo_nome AS ARQUIVO_ORIGEM
     FROM sistema5_itens
     WHERE UPPER(TRIM(modelo)) = UPPER(TRIM(?))
