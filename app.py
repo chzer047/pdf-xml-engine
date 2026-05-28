@@ -103,6 +103,63 @@ CREATE TABLE IF NOT EXISTS registros (
 )
 """)
 
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS sistema5_clientes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    categoria TEXT,
+    cliente_base TEXT,
+    data_cadastro TEXT,
+    UNIQUE(categoria, cliente_base)
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS sistema5_fabricas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cliente_id INTEGER,
+    fabrica TEXT,
+    ce_bri TEXT,
+    endereco_fabrica TEXT,
+    data_cadastro TEXT,
+    UNIQUE(cliente_id, fabrica)
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS sistema5_arquivos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cliente_id INTEGER,
+    fabrica_id INTEGER,
+    tipo_processo TEXT,
+    ip_processo TEXT,
+    data_processo TEXT,
+    arquivo_nome TEXT,
+    data_upload TEXT
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS sistema5_itens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    arquivo_id INTEGER,
+    cliente_base TEXT,
+    categoria TEXT,
+    fabrica TEXT,
+    ce_bri TEXT,
+    endereco_fabrica TEXT,
+    tipo_processo TEXT,
+    ip_processo TEXT,
+    data_processo TEXT,
+    marca TEXT,
+    modelo TEXT,
+    nome TEXT,
+    codigo TEXT,
+    arquivo_nome TEXT,
+    data_upload TEXT
+)
+""")
+
 conn.commit()
 
 # ==========================================
@@ -1390,12 +1447,11 @@ def buscar_item_confirmacao(valor_ref):
     if not ref:
         return None
 
-    # REGRA OFICIAL:
-    # Qualquer célula verde = referência.
-    # Busca segura:
-    # 1. MODELO exato
-    # 2. MODELO começando com a referência
-    # NÃO busca por código de barras, nome ou marca.
+    item_s5 = buscar_item_sistema5_confirmacao(ref)
+
+    if item_s5:
+        return item_s5
+
     resultado = pd.read_sql_query("""
     SELECT
         i.marca AS MARCA,
@@ -1412,10 +1468,9 @@ def buscar_item_confirmacao(valor_ref):
     LEFT JOIN registros r
     ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
     AND r.familia = c.familia
-    WHERE
-        UPPER(TRIM(i.modelo)) = UPPER(TRIM(?))
-        OR UPPER(TRIM(i.modelo)) LIKE UPPER(TRIM(?) || ' -%')
-        OR UPPER(TRIM(i.modelo)) LIKE UPPER(TRIM(?) || '%')
+    WHERE UPPER(TRIM(i.modelo)) = UPPER(TRIM(?))
+       OR UPPER(TRIM(i.modelo)) LIKE UPPER(TRIM(?) || ' -%')
+       OR UPPER(TRIM(i.modelo)) LIKE UPPER(TRIM(?) || '%')
     ORDER BY c.rev DESC, c.ip_bri DESC
     LIMIT 1
     """, conn, params=(ref, ref, ref))
@@ -1601,6 +1656,299 @@ def pesquisar_por_registro(registro_busca):
     ORDER BY r.registro, c.ip_bri, marcas.fabricante
     """, conn, params=(f"{termo}%",))
 
+
+# ==========================================
+# SISTEMA 5 - INCLUSÕES / MANUTENÇÕES
+# ==========================================
+
+def normalizar_categoria_sistema5(valor):
+    valor = clean(valor).upper()
+    if "NOVO" in valor:
+        return "SISTEMA 5 NOVO PROJETO"
+    if "PROPR" in valor:
+        return "SISTEMA 5 PROPRIOS"
+    return valor
+
+
+def extrair_ip_processo(nome):
+    texto = clean(nome).upper()
+    match = re.search(r"\bIP[- ]?\d+[-/]\d+\b", texto)
+    if match:
+        return match.group(0).replace(" ", "-")
+    return None
+
+
+def extrair_data_processo(nome):
+    texto = clean(nome)
+    match = re.search(r"\b(\d{2})[-_.](\d{2})[-_.](\d{2,4})\b", texto)
+    if not match:
+        return None
+    dia, mes, ano = match.groups()
+    if len(ano) == 2:
+        ano = "20" + ano
+    return f"{ano}-{mes}-{dia}"
+
+
+def detectar_tipo_processo(nome):
+    texto = clean(nome).upper()
+    if "MANUT" in texto:
+        return "MANUTENCAO"
+    if "RECERT" in texto:
+        return "RECERTIFICACAO"
+    if "INICIAL" in texto:
+        return "INICIAL"
+    if "INCLUS" in texto:
+        return "INCLUSAO"
+    return "OUTROS"
+
+
+def get_or_create_cliente_sistema5(categoria, cliente_base):
+    categoria = normalizar_categoria_sistema5(categoria)
+    cliente_base = clean(cliente_base).upper()
+
+    cursor.execute("""
+    INSERT OR IGNORE INTO sistema5_clientes (categoria, cliente_base, data_cadastro)
+    VALUES (?, ?, ?)
+    """, (categoria, cliente_base, datetime.now().strftime("%d/%m/%Y %H:%M:%S")))
+    conn.commit()
+
+    return cursor.execute("""
+    SELECT id FROM sistema5_clientes
+    WHERE categoria = ? AND cliente_base = ?
+    """, (categoria, cliente_base)).fetchone()[0]
+
+
+def get_or_create_fabrica_sistema5(cliente_id, fabrica, ce_bri="", endereco_fabrica=""):
+    fabrica = clean(fabrica).upper()
+    ce_bri = clean(ce_bri).upper()
+    endereco_fabrica = clean(endereco_fabrica)
+
+    cursor.execute("""
+    INSERT OR IGNORE INTO sistema5_fabricas (
+        cliente_id, fabrica, ce_bri, endereco_fabrica, data_cadastro
+    )
+    VALUES (?, ?, ?, ?, ?)
+    """, (
+        cliente_id,
+        fabrica,
+        ce_bri,
+        endereco_fabrica,
+        datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    ))
+
+    cursor.execute("""
+    UPDATE sistema5_fabricas
+    SET
+        ce_bri = COALESCE(NULLIF(?, ''), ce_bri),
+        endereco_fabrica = COALESCE(NULLIF(?, ''), endereco_fabrica)
+    WHERE cliente_id = ? AND fabrica = ?
+    """, (ce_bri, endereco_fabrica, cliente_id, fabrica))
+
+    conn.commit()
+
+    return cursor.execute("""
+    SELECT id FROM sistema5_fabricas
+    WHERE cliente_id = ? AND fabrica = ?
+    """, (cliente_id, fabrica)).fetchone()[0]
+
+
+def normalizar_coluna_excel_s5(valor):
+    txt = clean(valor).upper()
+    txt = txt.replace("CÓDIGO", "CODIGO")
+    txt = txt.replace("CÓD.", "CODIGO")
+    txt = txt.replace("COD.", "CODIGO")
+    txt = txt.replace("DESIGNAÇÃO COMERCIAL DE MODELO", "MODELO")
+    txt = txt.replace("DESIGNACAO COMERCIAL DE MODELO", "MODELO")
+    txt = txt.replace("DESCRIÇÃO TÉCNICA DO MODELO", "NOME")
+    txt = txt.replace("DESCRICAO TECNICA DO MODELO", "NOME")
+    txt = txt.replace("DESCRIÇÃO", "NOME")
+    txt = txt.replace("DESCRICAO", "NOME")
+    txt = txt.replace("CÓD DE BARRAS", "CODIGO")
+    txt = txt.replace("COD DE BARRAS", "CODIGO")
+    txt = txt.replace("CÓDIGO DE BARRAS", "CODIGO")
+    txt = txt.replace("CODIGO DE BARRAS", "CODIGO")
+    return txt
+
+
+def ler_excel_inclusao_sistema5(uploaded_file):
+    bruto = pd.read_excel(uploaded_file, header=None, dtype=object)
+    header_idx = None
+    colunas = {}
+
+    for i, row in bruto.iterrows():
+        normalizadas = [normalizar_coluna_excel_s5(v) for v in row.values]
+        achou_modelo = False
+
+        for idx, nome in enumerate(normalizadas):
+            if nome == "MARCA":
+                colunas["MARCA"] = idx
+            elif nome == "MODELO" or "MODELO" in nome:
+                colunas["MODELO"] = idx
+                achou_modelo = True
+            elif nome == "NOME" or "DESCRI" in nome:
+                colunas["NOME"] = idx
+            elif nome == "CODIGO" or "BARRAS" in nome:
+                colunas["CODIGO"] = idx
+
+        if achou_modelo:
+            header_idx = i
+            break
+
+    if header_idx is None:
+        return pd.DataFrame()
+
+    linhas = []
+
+    for j in range(header_idx + 1, len(bruto)):
+        row = bruto.iloc[j]
+        modelo = clean(row.iloc[colunas["MODELO"]]) if "MODELO" in colunas and colunas["MODELO"] < len(row) else ""
+
+        if not modelo:
+            continue
+
+        marca = clean(row.iloc[colunas["MARCA"]]) if "MARCA" in colunas and colunas["MARCA"] < len(row) else ""
+        nome = clean(row.iloc[colunas["NOME"]]) if "NOME" in colunas and colunas["NOME"] < len(row) else ""
+        codigo_raw = clean(row.iloc[colunas["CODIGO"]]) if "CODIGO" in colunas and colunas["CODIGO"] < len(row) else ""
+        codigo = extrair_codigo_unico(codigo_raw) or codigo_raw
+
+        linhas.append({"MARCA": marca, "MODELO": modelo, "NOME": nome, "CODIGO": codigo})
+
+    return pd.DataFrame(linhas)
+
+
+def salvar_inclusao_sistema5(categoria, cliente_base, fabrica, ce_bri, endereco_fabrica, tipo_processo, ip_processo, data_processo, arquivo_nome, df_itens):
+    categoria = normalizar_categoria_sistema5(categoria)
+    cliente_base = clean(cliente_base).upper()
+    fabrica = clean(fabrica).upper()
+    ce_bri = clean(ce_bri).upper()
+    endereco_fabrica = clean(endereco_fabrica)
+    tipo_processo = clean(tipo_processo).upper()
+    ip_processo = clean(ip_processo).upper()
+
+    cliente_id = get_or_create_cliente_sistema5(categoria, cliente_base)
+    fabrica_id = get_or_create_fabrica_sistema5(cliente_id, fabrica, ce_bri, endereco_fabrica)
+
+    cursor.execute("""
+    INSERT INTO sistema5_arquivos (
+        cliente_id, fabrica_id, tipo_processo, ip_processo, data_processo, arquivo_nome, data_upload
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (
+        cliente_id,
+        fabrica_id,
+        tipo_processo,
+        ip_processo,
+        data_processo,
+        arquivo_nome,
+        datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    ))
+    conn.commit()
+    arquivo_id = cursor.lastrowid
+
+    total = 0
+
+    for _, r in df_itens.iterrows():
+        cursor.execute("""
+        INSERT INTO sistema5_itens (
+            arquivo_id, cliente_base, categoria, fabrica, ce_bri, endereco_fabrica,
+            tipo_processo, ip_processo, data_processo, marca, modelo, nome, codigo,
+            arquivo_nome, data_upload
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            arquivo_id,
+            cliente_base,
+            categoria,
+            fabrica,
+            ce_bri,
+            endereco_fabrica,
+            tipo_processo,
+            ip_processo,
+            data_processo,
+            clean(r.get("MARCA", "")),
+            clean(r.get("MODELO", "")),
+            clean(r.get("NOME", "")),
+            clean(r.get("CODIGO", "")),
+            arquivo_nome,
+            datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+        ))
+        total += 1
+
+    conn.commit()
+    return total
+
+
+def buscar_item_sistema5_confirmacao(valor_ref):
+    ref = clean(valor_ref)
+
+    if not ref:
+        return None
+
+    resultado = pd.read_sql_query("""
+    SELECT
+        marca AS MARCA,
+        modelo AS MODELO,
+        nome AS NOME,
+        codigo AS CODIGO,
+        ip_processo AS IP_BRI,
+        ce_bri AS CE_BRI,
+        NULL AS REGISTRO,
+        endereco_fabrica AS ENDERECO,
+        fabrica AS FABRICA,
+        tipo_processo AS TIPO_PROCESSO,
+        data_processo AS DATA_PROCESSO,
+        arquivo_nome AS ARQUIVO_ORIGEM
+    FROM sistema5_itens
+    WHERE UPPER(TRIM(modelo)) = UPPER(TRIM(?))
+       OR UPPER(TRIM(modelo)) LIKE UPPER(TRIM(?) || ' -%')
+       OR UPPER(TRIM(modelo)) LIKE UPPER(TRIM(?) || '%')
+    ORDER BY COALESCE(data_processo, '1900-01-01') DESC, id DESC
+    LIMIT 1
+    """, conn, params=(ref, ref, ref))
+
+    if resultado.empty:
+        return None
+
+    item = resultado.iloc[0].to_dict()
+    ce_bri = item.get("CE_BRI")
+
+    if ce_bri:
+        registro_complementar = pd.read_sql_query("""
+        SELECT registro
+        FROM registros
+        WHERE UPPER(ce_bri) = UPPER(?)
+        ORDER BY id DESC
+        LIMIT 1
+        """, conn, params=(ce_bri,))
+
+        if not registro_complementar.empty:
+            item["REGISTRO"] = registro_complementar.iloc[0]["registro"]
+
+    return item
+
+
+def listar_sistema5_resumo():
+    return pd.read_sql_query("""
+    SELECT
+        c.categoria,
+        c.cliente_base,
+        f.fabrica,
+        f.ce_bri,
+        f.endereco_fabrica,
+        a.tipo_processo,
+        a.ip_processo,
+        a.data_processo,
+        a.arquivo_nome,
+        COUNT(i.id) AS qtd_itens
+    FROM sistema5_clientes c
+    LEFT JOIN sistema5_fabricas f ON f.cliente_id = c.id
+    LEFT JOIN sistema5_arquivos a ON a.fabrica_id = f.id
+    LEFT JOIN sistema5_itens i ON i.arquivo_id = a.id
+    GROUP BY c.categoria, c.cliente_base, f.fabrica, f.ce_bri, f.endereco_fabrica,
+             a.tipo_processo, a.ip_processo, a.data_processo, a.arquivo_nome
+    ORDER BY c.categoria, c.cliente_base, f.fabrica, a.data_processo DESC
+    """, conn)
+
 # ==========================================
 # TABS
 # ==========================================
@@ -1619,12 +1967,13 @@ try:
 except Exception as e:
     st.sidebar.warning(f"Backup geral indisponível: {e}")
 
-aba1, aba2, aba3, aba4, aba5 = st.tabs([
+aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
     "PDF → XML",
     "Banco de Certificados",
     "Registros",
     "Preenchimento de Confirmação",
-    "Pesquisa Avançada"
+    "Pesquisa Avançada",
+    "Sistema 5"
 ])
 
 # ==========================================
@@ -2579,4 +2928,152 @@ with aba5:
                     "text/csv",
                     key="download_pesquisa_registro"
                 )
+
+# ==========================================
+# ABA 6 - SISTEMA 5
+# ==========================================
+
+with aba6:
+    st.title("Sistema 5")
+
+    st.info(
+        "Módulo de teste para processos mais recentes que o certificado oficial. "
+        "Somente arquivos com IP no nome serão considerados."
+    )
+
+    categoria_s5 = st.radio(
+        "Categoria",
+        ["SISTEMA 5 NOVO PROJETO", "SISTEMA 5 PROPRIOS"],
+        horizontal=True,
+        key="s5_categoria"
+    )
+
+    cliente_s5 = st.text_input(
+        "Cliente / Solicitante",
+        value="BOLSA" if categoria_s5 == "SISTEMA 5 NOVO PROJETO" else "",
+        key="s5_cliente"
+    )
+
+    col_f1, col_f2 = st.columns(2)
+
+    with col_f1:
+        fabrica_s5 = st.text_input(
+            "Fábrica",
+            placeholder="Ex: F01, F02, FÁBRICA 01...",
+            key="s5_fabrica"
+        )
+
+        ce_bri_s5 = st.text_input(
+            "CE-BRI da fábrica",
+            placeholder="Ex: CE-BRI-INNAC-02484-01A",
+            key="s5_ce_bri"
+        )
+
+    with col_f2:
+        endereco_s5 = st.text_area(
+            "Endereço da fábrica",
+            placeholder="Cole aqui o endereço completo da fábrica",
+            height=120,
+            key="s5_endereco"
+        )
+
+    st.divider()
+    st.subheader("Enviar Excel de processo")
+
+    arquivo_s5 = st.file_uploader(
+        "Envie o Excel com IP no nome",
+        type=["xlsx", "xls"],
+        key="s5_excel"
+    )
+
+    if arquivo_s5:
+        ip_extraido = extrair_ip_processo(arquivo_s5.name)
+        data_extraida = extrair_data_processo(arquivo_s5.name)
+        tipo_detectado = detectar_tipo_processo(arquivo_s5.name)
+
+        if not ip_extraido:
+            st.error("Arquivo ignorado: o nome do arquivo precisa conter IP. Exemplo: INCLUSÃO 06-01-26 F01 IP-0094-26.xlsx")
+        else:
+            st.success(f"IP identificado: {ip_extraido}")
+            st.info(f"Tipo detectado: {tipo_detectado} | Data detectada: {data_extraida or 'não encontrada'}")
+
+            tipos = ["INCLUSAO", "MANUTENCAO", "RECERTIFICACAO", "INICIAL", "OUTROS"]
+
+            tipo_s5 = st.selectbox(
+                "Tipo de processo",
+                tipos,
+                index=tipos.index(tipo_detectado) if tipo_detectado in tipos else 0,
+                key="s5_tipo"
+            )
+
+            data_s5 = st.text_input(
+                "Data do processo",
+                value=data_extraida or "",
+                placeholder="AAAA-MM-DD",
+                key="s5_data"
+            )
+
+            try:
+                df_s5 = ler_excel_inclusao_sistema5(arquivo_s5)
+
+                if df_s5.empty:
+                    st.warning("Nenhum item encontrado nesse Excel. Verifique se há coluna de MODELO / referência.")
+                else:
+                    st.subheader("Prévia dos itens encontrados")
+                    st.dataframe(df_s5, use_container_width=True)
+
+                    if st.button("Salvar processo no Sistema 5", key="s5_salvar_processo"):
+                        if not clean(cliente_s5) or not clean(fabrica_s5):
+                            st.error("Informe cliente e fábrica antes de salvar.")
+                        else:
+                            total = salvar_inclusao_sistema5(
+                                categoria_s5,
+                                cliente_s5,
+                                fabrica_s5,
+                                ce_bri_s5,
+                                endereco_s5,
+                                tipo_s5,
+                                ip_extraido,
+                                data_s5,
+                                arquivo_s5.name,
+                                df_s5
+                            )
+
+                            st.success(f"{total} itens salvos no Sistema 5 ✅")
+
+            except Exception as e:
+                st.error(f"Erro ao ler Excel do Sistema 5: {e}")
+
+    st.divider()
+    st.subheader("Estrutura salva no Sistema 5")
+
+    resumo_s5 = listar_sistema5_resumo()
+
+    if resumo_s5.empty:
+        st.info("Nenhum processo salvo ainda.")
+    else:
+        categorias = resumo_s5["categoria"].dropna().unique().tolist()
+
+        for categoria in categorias:
+            with st.expander(f"📁 {categoria}", expanded=False):
+                bloco_categoria = resumo_s5[resumo_s5["categoria"] == categoria]
+                clientes = bloco_categoria["cliente_base"].dropna().unique().tolist()
+
+                for cliente in clientes:
+                    st.markdown(f"### 📁 {cliente}")
+                    bloco_cliente = bloco_categoria[bloco_categoria["cliente_base"] == cliente]
+                    fabricas = bloco_cliente["fabrica"].dropna().unique().tolist()
+
+                    for fabrica in fabricas:
+                        with st.expander(f"🏭 {fabrica}", expanded=False):
+                            bloco_fabrica = bloco_cliente[bloco_cliente["fabrica"] == fabrica]
+                            st.dataframe(bloco_fabrica, use_container_width=True)
+
+        st.download_button(
+            "Baixar resumo Sistema 5 CSV",
+            resumo_s5.to_csv(index=False, sep=";").encode("ISO-8859-1", errors="replace"),
+            "sistema5_resumo.csv",
+            "text/csv",
+            key="download_sistema5_resumo"
+        )
 
