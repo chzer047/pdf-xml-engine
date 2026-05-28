@@ -1758,37 +1758,63 @@ def get_or_create_fabrica_sistema5(cliente_id, fabrica, ce_bri="", endereco_fabr
 
 def normalizar_coluna_excel_s5(valor):
     txt = clean(valor).upper()
-    txt = txt.replace("Á", "A").replace("À", "A").replace("Â", "A").replace("Ã", "A")
-    txt = txt.replace("É", "E").replace("Ê", "E")
-    txt = txt.replace("Í", "I")
-    txt = txt.replace("Ó", "O").replace("Ô", "O").replace("Õ", "O")
-    txt = txt.replace("Ú", "U")
-    txt = txt.replace("Ç", "C")
 
-    txt = txt.replace("CODIGO DE BARRAS", "CODIGO")
-    txt = txt.replace("COD DE BARRAS", "CODIGO")
-    txt = txt.replace("COD. DE BARRAS", "CODIGO")
-    txt = txt.replace("COD.", "CODIGO")
-    txt = txt.replace("CÓD.", "CODIGO")
-    txt = txt.replace("CÓDIGO", "CODIGO")
+    # Remove acentos para padronizar
+    troca = {
+        "Á": "A", "À": "A", "Â": "A", "Ã": "A",
+        "É": "E", "Ê": "E",
+        "Í": "I",
+        "Ó": "O", "Ô": "O", "Õ": "O",
+        "Ú": "U",
+        "Ç": "C"
+    }
 
-    txt = txt.replace("MODELO/REFERENCIA", "MODELO")
-    txt = txt.replace("MODELO / REFERENCIA", "MODELO")
-    txt = txt.replace("MODELO/REFERÊNCIA", "MODELO")
-    txt = txt.replace("MODELO / REFERÊNCIA", "MODELO")
-    txt = txt.replace("REFERENCIA", "MODELO")
-    txt = txt.replace("REFERÊNCIA", "MODELO")
-    txt = txt.replace("DESIGNACAO COMERCIAL DE MODELO", "MODELO")
-    txt = txt.replace("DESIGNAÇÃO COMERCIAL DE MODELO", "MODELO")
+    for antigo, novo in troca.items():
+        txt = txt.replace(antigo, novo)
 
-    txt = txt.replace("DESCRICAO TECNICA", "NOME")
-    txt = txt.replace("DESCRIÇÃO TÉCNICA", "NOME")
-    txt = txt.replace("DESCRICAO TECNICA DO MODELO", "NOME")
-    txt = txt.replace("DESCRIÇÃO TÉCNICA DO MODELO", "NOME")
-    txt = txt.replace("DESCRICAO", "NOME")
-    txt = txt.replace("DESCRIÇÃO", "NOME")
+    # Limpa espaços duplicados
+    txt = re.sub(r"\s+", " ", txt).strip()
 
-    txt = txt.replace("ITEM.", "ITEM")
+    # Códigos
+    if (
+        "CODIGO DE BARRAS" in txt
+        or "COD DE BARRAS" in txt
+        or "COD. DE BARRAS" in txt
+        or txt in ["CODIGO", "COD.", "COD"]
+        or "BARRAS" in txt
+    ):
+        return "CODIGO"
+
+    # Modelo / Referência
+    if (
+        "MODELO" in txt
+        or "REFERENCIA" in txt
+        or "DESIGNACAO COMERCIAL" in txt
+    ):
+        return "MODELO"
+
+    # Marca
+    if (
+        "MARCA" in txt
+        or "MARCA COMERCIALIZADA" in txt
+        or "FABRICANTE" in txt
+    ):
+        return "MARCA"
+
+    # Descrição técnica
+    if (
+        "DESCRICAO TECNICA" in txt
+        or "DESCRICAO TECNICA DO MODELO" in txt
+        or "DESCRICAO" in txt
+        or "NOME" in txt
+        or "PROCESSO PRODUTIVO" in txt
+    ):
+        return "NOME"
+
+    # Item
+    if txt == "ITEM" or txt.startswith("ITEM "):
+        return "ITEM"
+
     return txt
 
 
@@ -1800,7 +1826,8 @@ def ler_excel_inclusao_sistema5(uploaded_file):
     - O Excel pode ter várias abas.
     - Cada aba representa uma família.
     - Dentro de cada aba existem as colunas:
-      ITEM, MODELO, MARCA, CÓDIGO DE BARRAS, DESCRIÇÃO TÉCNICA.
+      ITEM, MODELO / REFERÊNCIA, MARCA COMERCIALIZADA,
+      CÓDIGO DE BARRAS, DESCRIÇÃO TÉCNICA.
 
     Regras:
     - Só considera linha real se tiver MODELO + MARCA + CÓDIGO + DESCRIÇÃO.
@@ -1832,36 +1859,23 @@ def ler_excel_inclusao_sistema5(uploaded_file):
         colunas = {}
 
         for i, row in bruto.iterrows():
-            normalizadas = [normalizar_coluna_excel_s5(v) for v in row.values]
             temp = {}
 
-            for idx, nome in enumerate(normalizadas):
-                if nome == "ITEM" or nome.startswith("ITEM"):
+            for idx, valor in enumerate(row.values):
+                nome = normalizar_coluna_excel_s5(valor)
+
+                if nome == "ITEM":
                     temp["ITEM"] = idx
-
-                elif nome == "MODELO" or "MODELO" in nome:
+                elif nome == "MODELO":
                     temp["MODELO"] = idx
-
-                elif nome == "MARCA" or "MARCA" in nome:
+                elif nome == "MARCA":
                     temp["MARCA"] = idx
-
-                elif (
-                    nome == "CODIGO"
-                    or "CODIGO" in nome
-                    or "BARRAS" in nome
-                    or "CÓDIGO" in nome
-                ):
+                elif nome == "CODIGO":
                     temp["CODIGO"] = idx
-
-                elif (
-                    nome == "NOME"
-                    or "DESCRICAO" in nome
-                    or "DESCRIÇÃO" in nome
-                    or "TECNICA" in nome
-                    or "TÉCNICA" in nome
-                ):
+                elif nome == "NOME":
                     temp["NOME"] = idx
 
+            # Cabeçalho real precisa ter os campos centrais.
             if all(campo in temp for campo in ["MODELO", "MARCA", "CODIGO", "NOME"]):
                 header_idx = i
                 colunas = temp
@@ -1885,7 +1899,7 @@ def ler_excel_inclusao_sistema5(uploaded_file):
             codigo_raw = valor_coluna("CODIGO")
             nome = valor_coluna("NOME")
 
-            codigo = extrair_codigo_unico(codigo_raw) or re.sub(r"\\D", "", codigo_raw)
+            codigo = extrair_codigo_unico(codigo_raw) or re.sub(r"\D", "", codigo_raw)
 
             linha_texto = " ".join([modelo, marca, codigo_raw, nome]).upper()
 
@@ -1906,9 +1920,11 @@ def ler_excel_inclusao_sistema5(uploaded_file):
             if any(p in linha_texto for p in palavras_ignorar):
                 continue
 
+            # Linha real precisa ter os 4 campos principais.
             if not modelo or not marca or not codigo or not nome:
                 continue
 
+            # Evita cabeçalho repetido
             if normalizar_coluna_excel_s5(modelo) == "MODELO":
                 continue
 
