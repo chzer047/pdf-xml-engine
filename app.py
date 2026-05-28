@@ -1949,6 +1949,78 @@ def listar_sistema5_resumo():
     ORDER BY c.categoria, c.cliente_base, f.fabrica, a.data_processo DESC
     """, conn)
 
+
+def buscar_dados_fabrica_existente(cliente_base="", fabrica="", ce_bri=""):
+    cliente_base = clean(cliente_base).upper()
+    fabrica = clean(fabrica)
+    ce_bri = clean(ce_bri).upper()
+
+    where = []
+    params = []
+
+    if cliente_base:
+        where.append("UPPER(cliente_base) = UPPER(?)")
+        params.append(cliente_base)
+
+    if fabrica:
+        where.append("UPPER(fabrica) = UPPER(?)")
+        params.append(fabrica)
+
+    if ce_bri:
+        where.append("UPPER(ce_bri) = UPPER(?)")
+        params.append(ce_bri)
+
+    if not where:
+        return None
+
+    sql = f"""
+    SELECT
+        cliente_base,
+        fabrica,
+        ce_bri,
+        endereco_fabrica
+    FROM registros
+    WHERE {" AND ".join(where)}
+    ORDER BY id DESC
+    LIMIT 1
+    """
+
+    resultado = pd.read_sql_query(sql, conn, params=tuple(params))
+
+    if resultado.empty:
+        return None
+
+    return resultado.iloc[0].to_dict()
+
+
+def listar_fabricas_existentes_para_sistema5(cliente_base=""):
+    cliente_base = clean(cliente_base).upper()
+
+    if cliente_base:
+        return pd.read_sql_query("""
+        SELECT DISTINCT
+            fabrica,
+            ce_bri,
+            endereco_fabrica
+        FROM registros
+        WHERE UPPER(cliente_base) = UPPER(?)
+        AND fabrica IS NOT NULL
+        AND fabrica != ''
+        ORDER BY fabrica
+        """, conn, params=(cliente_base,))
+
+    return pd.read_sql_query("""
+    SELECT DISTINCT
+        cliente_base,
+        fabrica,
+        ce_bri,
+        endereco_fabrica
+    FROM registros
+    WHERE fabrica IS NOT NULL
+    AND fabrica != ''
+    ORDER BY cliente_base, fabrica
+    """, conn)
+
 # ==========================================
 # TABS
 # ==========================================
@@ -2954,17 +3026,68 @@ with aba6:
         key="s5_cliente"
     )
 
+    st.subheader("Fábrica")
+
+    fabricas_existentes_s5 = listar_fabricas_existentes_para_sistema5(cliente_s5)
+
+    usar_fabrica_existente = False
+
+    if not fabricas_existentes_s5.empty:
+        usar_fabrica_existente = st.checkbox(
+            "Usar fábrica já cadastrada nos Registros",
+            value=True,
+            key="s5_usar_fabrica_existente"
+        )
+
+    dados_fabrica_sugeridos = None
+
+    if usar_fabrica_existente and not fabricas_existentes_s5.empty:
+        opcoes_fabrica_s5 = []
+
+        for _, linha_fab in fabricas_existentes_s5.iterrows():
+            fab = clean(linha_fab.get("fabrica", ""))
+            ce = clean(linha_fab.get("ce_bri", ""))
+            opcoes_fabrica_s5.append(f"{fab} | {ce}")
+
+        escolha_fabrica_s5 = st.selectbox(
+            "Selecione uma fábrica já cadastrada",
+            opcoes_fabrica_s5,
+            key="s5_fabrica_existente_select"
+        )
+
+        fabrica_escolhida = escolha_fabrica_s5.split("|")[0].strip()
+        ce_escolhido = escolha_fabrica_s5.split("|")[1].strip() if "|" in escolha_fabrica_s5 else ""
+
+        dados_fabrica_sugeridos = buscar_dados_fabrica_existente(
+            cliente_s5,
+            fabrica_escolhida,
+            ce_escolhido
+        )
+
+        fabrica_padrao = dados_fabrica_sugeridos.get("fabrica", fabrica_escolhida) if dados_fabrica_sugeridos else fabrica_escolhida
+        ce_padrao = dados_fabrica_sugeridos.get("ce_bri", ce_escolhido) if dados_fabrica_sugeridos else ce_escolhido
+        endereco_padrao = dados_fabrica_sugeridos.get("endereco_fabrica", "") if dados_fabrica_sugeridos else ""
+
+        st.success("Dados da fábrica puxados dos Registros ✅")
+
+    else:
+        fabrica_padrao = ""
+        ce_padrao = ""
+        endereco_padrao = ""
+
     col_f1, col_f2 = st.columns(2)
 
     with col_f1:
         fabrica_s5 = st.text_input(
             "Fábrica",
+            value=fabrica_padrao,
             placeholder="Ex: F01, F02, FÁBRICA 01...",
             key="s5_fabrica"
         )
 
         ce_bri_s5 = st.text_input(
             "CE-BRI da fábrica",
+            value=ce_padrao,
             placeholder="Ex: CE-BRI-INNAC-02484-01A",
             key="s5_ce_bri"
         )
@@ -2972,10 +3095,22 @@ with aba6:
     with col_f2:
         endereco_s5 = st.text_area(
             "Endereço da fábrica",
+            value="" if pd.isna(endereco_padrao) else str(endereco_padrao),
             placeholder="Cole aqui o endereço completo da fábrica",
             height=120,
             key="s5_endereco"
         )
+
+    if clean(ce_bri_s5) and not clean(endereco_s5):
+        dados_por_ce = buscar_dados_fabrica_existente(
+            cliente_s5,
+            "",
+            ce_bri_s5
+        )
+
+        if dados_por_ce and clean(dados_por_ce.get("endereco_fabrica", "")):
+            st.info("Existe endereço salvo para este CE-BRI nos Registros. Você pode copiar/preencher acima.")
+            st.code(dados_por_ce.get("endereco_fabrica", ""))
 
     st.divider()
     st.subheader("Enviar Excel de processo")
