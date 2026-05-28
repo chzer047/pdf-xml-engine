@@ -1372,7 +1372,10 @@ def buscar_item_confirmacao(valor_ref):
     if not ref:
         return None
 
-    # Busca segura: a célula verde é a REFERÊNCIA EXATA.
+    # REGRA OFICIAL:
+    # QUALQUER célula verde é uma referência.
+    # Não precisa existir coluna chamada REF.
+    # O valor da célula verde será buscado SOMENTE no campo MODELO do banco.
     # Não busca por código de barras, nome, marca ou aproximação.
     resultado = pd.read_sql_query("""
     SELECT
@@ -1398,7 +1401,6 @@ def buscar_item_confirmacao(valor_ref):
         return None
 
     return resultado.iloc[0].to_dict()
-
 
 
 def descobrir_cabecalho_coluna(ws, row_idx, col_idx):
@@ -1434,6 +1436,10 @@ def preencher_excel_confirmacao(uploaded_file):
         for row in ws.iter_rows():
             refs = []
 
+            # REGRA OFICIAL:
+            # Qualquer célula verde da linha é considerada referência.
+            # Não importa o nome da coluna.
+            # Não precisa existir coluna chamada REF.
             for cell in row:
                 if eh_verde(cell) and clean(cell.value):
                     refs.append(clean(cell.value))
@@ -1443,6 +1449,7 @@ def preencher_excel_confirmacao(uploaded_file):
 
             item = None
 
+            # Se houver mais de uma célula verde na linha, tenta na ordem em que aparece.
             for ref in refs:
                 item = buscar_item_confirmacao(ref)
                 if item:
@@ -1471,12 +1478,7 @@ def preencher_excel_confirmacao(uploaded_file):
                 if valor == "" or valor.lower() == "nan":
                     continue
 
-                valor_anterior = clean(cell.value)
-
                 cell.value = valor
-
-                # Conta toda célula amarela que recebeu valor do banco,
-                # mesmo que já estivesse preenchida antes.
                 preenchidos += 1
 
     output = BytesIO()
@@ -2344,8 +2346,9 @@ with aba5:
     st.title("Preenchimento de Confirmação")
 
     st.info(
-        "Envie o Excel de confirmação. O sistema vai usar as células verdes como referência, "
-        "identificar as colunas pelo cabeçalho azul e preencher somente as células amarelas com dados do banco."
+        "Envie o Excel de confirmação. Qualquer célula verde será tratada como referência, "
+        "sem precisar de coluna chamada REF. A busca será feita SOMENTE no campo MODELO do banco. "
+        "As células amarelas serão preenchidas conforme o cabeçalho azul da coluna."
     )
 
     arquivo_confirmacao = st.file_uploader(
