@@ -1543,6 +1543,9 @@ def pesquisar_por_ip_bri(ip_bri_busca):
     if not termo:
         return pd.DataFrame()
 
+    termo_sem_prefixo = termo.replace("IP-BRI-", "")
+    termo_com_prefixo = termo if termo.startswith("IP-BRI-") else f"IP-BRI-{termo}"
+
     return pd.read_sql_query("""
     SELECT DISTINCT
         c.ip_bri AS ip_bri,
@@ -1561,7 +1564,7 @@ def pesquisar_por_ip_bri(ip_bri_busca):
     WHERE UPPER(c.ip_bri) LIKE ?
        OR REPLACE(UPPER(c.ip_bri), 'IP-BRI-', '') LIKE ?
     ORDER BY c.ip_bri, r.fabrica, r.registro
-    """, conn, params=(f"%{termo}%", f"%{termo.replace('IP-BRI-', '')}%"))
+    """, conn, params=(f"{termo_com_prefixo}%", f"{termo_sem_prefixo}%"))
 
 
 def pesquisar_por_registro(registro_busca):
@@ -1571,14 +1574,14 @@ def pesquisar_por_registro(registro_busca):
         return pd.DataFrame()
 
     return pd.read_sql_query("""
-    SELECT DISTINCT
+    SELECT
         r.registro AS registro,
         c.ip_bri AS ip_bri,
         c.ce_bri AS ce_bri,
         c.familia AS fam,
         r.fabrica AS fabrica,
         r.endereco_fabrica AS endereco,
-        i.marca AS fabricante,
+        marcas.fabricante AS fabricante,
         c.rev AS rev,
         c.produto AS produto,
         c.data_emissao AS data_emissao
@@ -1586,11 +1589,17 @@ def pesquisar_por_registro(registro_busca):
     LEFT JOIN certificados c
     ON UPPER(c.ce_bri) = UPPER(r.ce_bri)
     AND c.familia = r.familia
-    LEFT JOIN itens i
-    ON i.certificado_id = c.id
+    LEFT JOIN (
+        SELECT
+            certificado_id,
+            MIN(marca) AS fabricante
+        FROM itens
+        GROUP BY certificado_id
+    ) marcas
+    ON marcas.certificado_id = c.id
     WHERE r.registro LIKE ?
-    ORDER BY r.registro, c.ip_bri, i.marca
-    """, conn, params=(f"%{termo}%",))
+    ORDER BY r.registro, c.ip_bri, marcas.fabricante
+    """, conn, params=(f"{termo}%",))
 
 # ==========================================
 # TABS
