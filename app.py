@@ -1372,11 +1372,6 @@ def buscar_item_confirmacao(valor_ref):
     if not ref:
         return None
 
-    # REGRA OFICIAL:
-    # QUALQUER célula verde é uma referência.
-    # Não precisa existir coluna chamada REF.
-    # O valor da célula verde será buscado SOMENTE no campo MODELO do banco.
-    # Não busca por código de barras, nome, marca ou aproximação.
     resultado = pd.read_sql_query("""
     SELECT
         i.marca AS MARCA,
@@ -1393,9 +1388,10 @@ def buscar_item_confirmacao(valor_ref):
     ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
     AND r.familia = c.familia
     WHERE UPPER(TRIM(i.modelo)) = UPPER(TRIM(?))
+       OR UPPER(TRIM(i.modelo)) LIKE UPPER(TRIM(?) || '%')
     ORDER BY c.rev DESC, c.ip_bri DESC
     LIMIT 1
-    """, conn, params=(ref,))
+    """, conn, params=(ref, ref))
 
     if resultado.empty:
         return None
