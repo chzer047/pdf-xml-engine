@@ -1758,25 +1758,36 @@ def get_or_create_fabrica_sistema5(cliente_id, fabrica, ce_bri="", endereco_fabr
 
 def normalizar_coluna_excel_s5(valor):
     txt = clean(valor).upper()
-    txt = txt.replace("CÓDIGO", "CODIGO")
-    txt = txt.replace("CÓD.", "CODIGO")
-    txt = txt.replace("COD.", "CODIGO")
-    txt = txt.replace("DESIGNAÇÃO COMERCIAL DE MODELO", "MODELO")
-    txt = txt.replace("DESIGNACAO COMERCIAL DE MODELO", "MODELO")
-    txt = txt.replace("DESCRIÇÃO TÉCNICA DO MODELO", "NOME")
-    txt = txt.replace("DESCRICAO TECNICA DO MODELO", "NOME")
-    txt = txt.replace("DESCRIÇÃO", "NOME")
-    txt = txt.replace("DESCRICAO", "NOME")
-    txt = txt.replace("CÓD DE BARRAS", "CODIGO")
-    txt = txt.replace("COD DE BARRAS", "CODIGO")
-    txt = txt.replace("CÓDIGO DE BARRAS", "CODIGO")
+    txt = txt.replace("Á", "A").replace("À", "A").replace("Â", "A").replace("Ã", "A")
+    txt = txt.replace("É", "E").replace("Ê", "E")
+    txt = txt.replace("Í", "I")
+    txt = txt.replace("Ó", "O").replace("Ô", "O").replace("Õ", "O")
+    txt = txt.replace("Ú", "U")
+    txt = txt.replace("Ç", "C")
+
     txt = txt.replace("CODIGO DE BARRAS", "CODIGO")
-    txt = txt.replace("CÓDIGO BARRAS", "CODIGO")
-    txt = txt.replace("CODIGO BARRAS", "CODIGO")
-    txt = txt.replace("DESCRIÇÃO TÉCNICA", "NOME")
+    txt = txt.replace("COD DE BARRAS", "CODIGO")
+    txt = txt.replace("COD. DE BARRAS", "CODIGO")
+    txt = txt.replace("COD.", "CODIGO")
+    txt = txt.replace("CÓD.", "CODIGO")
+    txt = txt.replace("CÓDIGO", "CODIGO")
+
+    txt = txt.replace("MODELO/REFERENCIA", "MODELO")
+    txt = txt.replace("MODELO / REFERENCIA", "MODELO")
+    txt = txt.replace("MODELO/REFERÊNCIA", "MODELO")
+    txt = txt.replace("MODELO / REFERÊNCIA", "MODELO")
+    txt = txt.replace("REFERENCIA", "MODELO")
+    txt = txt.replace("REFERÊNCIA", "MODELO")
+    txt = txt.replace("DESIGNACAO COMERCIAL DE MODELO", "MODELO")
+    txt = txt.replace("DESIGNAÇÃO COMERCIAL DE MODELO", "MODELO")
+
     txt = txt.replace("DESCRICAO TECNICA", "NOME")
-    txt = txt.replace("DESCRIÇÃO TECNICA", "NOME")
-    txt = txt.replace("DESCRICAO TÉCNICA", "NOME")
+    txt = txt.replace("DESCRIÇÃO TÉCNICA", "NOME")
+    txt = txt.replace("DESCRICAO TECNICA DO MODELO", "NOME")
+    txt = txt.replace("DESCRIÇÃO TÉCNICA DO MODELO", "NOME")
+    txt = txt.replace("DESCRICAO", "NOME")
+    txt = txt.replace("DESCRIÇÃO", "NOME")
+
     txt = txt.replace("ITEM.", "ITEM")
     return txt
 
@@ -1905,7 +1916,7 @@ def ler_excel_inclusao_sistema5(uploaded_file):
                 continue
 
             todos_itens.append({
-                "FAMILIA": str(aba),
+                "FAMILIA": normalizar_familia_aba_s5(aba),
                 "ITEM": item,
                 "MARCA": marca,
                 "MODELO": modelo,
@@ -2133,6 +2144,66 @@ def listar_fabricas_existentes_para_sistema5(cliente_base=""):
     AND fabrica != ''
     ORDER BY cliente_base, fabrica
     """, conn)
+
+
+def extrair_codigo_fabrica_nome(nome):
+    texto = clean(nome).upper()
+    match = re.search(r"\bF\s*0*(\d{1,3})\b", texto)
+    if match:
+        numero = int(match.group(1))
+        return f"F{numero:02d}"
+    return ""
+
+
+def normalizar_familia_aba_s5(nome_aba):
+    texto = clean(nome_aba).upper()
+    numeros = re.findall(r"\d+", texto)
+    if numeros:
+        return str(int(numeros[0]))
+    return texto
+
+
+def buscar_fabrica_por_codigo_s5(cliente_base, codigo_fabrica):
+    cliente_base = clean(cliente_base).upper()
+    codigo_fabrica = clean(codigo_fabrica).upper()
+
+    if not cliente_base or not codigo_fabrica:
+        return None
+
+    numero = re.sub(r"\D", "", codigo_fabrica)
+    if numero:
+        numero_int = str(int(numero))
+        codigo_padrao = f"F{int(numero):02d}"
+    else:
+        numero_int = ""
+        codigo_padrao = codigo_fabrica
+
+    resultado = pd.read_sql_query("""
+    SELECT
+        cliente_base,
+        fabrica,
+        ce_bri,
+        endereco_fabrica
+    FROM registros
+    WHERE UPPER(cliente_base) = UPPER(?)
+    AND (
+        UPPER(fabrica) LIKE ?
+        OR UPPER(fabrica) LIKE ?
+        OR UPPER(fabrica) LIKE ?
+    )
+    ORDER BY id DESC
+    LIMIT 1
+    """, conn, params=(
+        cliente_base,
+        f"%{codigo_padrao}%",
+        f"%F{numero_int}%" if numero_int else f"%{codigo_fabrica}%",
+        f"%FÁBRICA {numero_int}%" if numero_int else f"%{codigo_fabrica}%"
+    ))
+
+    if resultado.empty:
+        return None
+
+    return resultado.iloc[0].to_dict()
 
 # ==========================================
 # TABS
@@ -3123,7 +3194,7 @@ with aba6:
 
     st.info(
         "Módulo de teste para processos mais recentes que o certificado oficial. "
-        "Somente arquivos com IP no nome serão considerados."
+        "Somente arquivos com IP no nome serão considerados. MODELO/REFERÊNCIA será tratado como MODELO, e cada aba do Excel será tratada como família pelo número da aba."
     )
 
     categoria_s5 = st.radio(
@@ -3238,12 +3309,35 @@ with aba6:
         ip_extraido = extrair_ip_processo(arquivo_s5.name)
         data_extraida = extrair_data_processo(arquivo_s5.name)
         tipo_detectado = detectar_tipo_processo(arquivo_s5.name)
+        fabrica_detectada_nome = extrair_codigo_fabrica_nome(arquivo_s5.name)
+        dados_fabrica_arquivo = buscar_fabrica_por_codigo_s5(cliente_s5, fabrica_detectada_nome) if fabrica_detectada_nome else None
 
         if not ip_extraido:
             st.error("Arquivo ignorado: o nome do arquivo precisa conter IP. Exemplo: INCLUSÃO 06-01-26 F01 IP-0094-26.xlsx")
         else:
             st.success(f"IP identificado: {ip_extraido}")
-            st.info(f"Tipo detectado: {tipo_detectado} | Data detectada: {data_extraida or 'não encontrada'}")
+            st.info(f"Tipo detectado: {tipo_detectado} | Data detectada: {data_extraida or 'não encontrada'} | Fábrica detectada no arquivo: {fabrica_detectada_nome or 'não encontrada'}")
+
+            if dados_fabrica_arquivo:
+                st.success(
+                    f"Fábrica vinculada automaticamente pela base {cliente_s5}: "
+                    f"{dados_fabrica_arquivo.get('fabrica', '')} | {dados_fabrica_arquivo.get('ce_bri', '')}"
+                )
+
+                usar_dados_auto_s5 = st.checkbox(
+                    "Usar CE-BRI e endereço encontrados automaticamente",
+                    value=True,
+                    key="s5_usar_dados_auto_arquivo"
+                )
+
+                if usar_dados_auto_s5:
+                    fabrica_s5 = dados_fabrica_arquivo.get("fabrica", fabrica_s5)
+                    ce_bri_s5 = dados_fabrica_arquivo.get("ce_bri", ce_bri_s5)
+                    endereco_s5 = dados_fabrica_arquivo.get("endereco_fabrica", endereco_s5)
+            elif fabrica_detectada_nome:
+                st.warning(
+                    f"O arquivo indica {fabrica_detectada_nome}, mas não encontrei essa fábrica nos Registros da base {cliente_s5}."
+                )
 
             tipos = ["INCLUSAO", "MANUTENCAO", "RECERTIFICACAO", "INICIAL", "OUTROS"]
 
