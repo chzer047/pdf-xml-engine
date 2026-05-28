@@ -1391,10 +1391,11 @@ def buscar_item_confirmacao(valor_ref):
         return None
 
     # REGRA OFICIAL:
-    # QUALQUER célula verde é uma referência.
-    # Não precisa existir coluna chamada REF.
-    # O valor da célula verde será buscado SOMENTE no campo MODELO do banco.
-    # Não busca por código de barras, nome, marca ou aproximação.
+    # Qualquer célula verde = referência.
+    # Busca segura:
+    # 1. MODELO exato
+    # 2. MODELO começando com a referência
+    # NÃO busca por código de barras, nome ou marca.
     resultado = pd.read_sql_query("""
     SELECT
         i.marca AS MARCA,
@@ -1411,10 +1412,13 @@ def buscar_item_confirmacao(valor_ref):
     LEFT JOIN registros r
     ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
     AND r.familia = c.familia
-    WHERE UPPER(TRIM(i.modelo)) = UPPER(TRIM(?))
+    WHERE
+        UPPER(TRIM(i.modelo)) = UPPER(TRIM(?))
+        OR UPPER(TRIM(i.modelo)) LIKE UPPER(TRIM(?) || ' -%')
+        OR UPPER(TRIM(i.modelo)) LIKE UPPER(TRIM(?) || '%')
     ORDER BY c.rev DESC, c.ip_bri DESC
     LIMIT 1
-    """, conn, params=(ref,))
+    """, conn, params=(ref, ref, ref))
 
     if resultado.empty:
         return None
@@ -1505,6 +1509,26 @@ def preencher_excel_confirmacao(uploaded_file):
     output.seek(0)
 
     return output, preenchidos, nao_encontrados
+
+
+def atualizar_endereco_fabrica_existente(cliente_base, fabrica, novo_endereco):
+    cliente_base = clean(cliente_base).upper()
+    fabrica = clean(fabrica)
+    novo_endereco = clean(novo_endereco)
+
+    cursor.execute("""
+    UPDATE registros
+    SET endereco_fabrica = ?
+    WHERE UPPER(cliente_base) = UPPER(?)
+    AND fabrica = ?
+    """, (
+        novo_endereco,
+        cliente_base,
+        fabrica
+    ))
+
+    conn.commit()
+    return cursor.rowcount
 
 
 # ==========================================
@@ -2374,6 +2398,78 @@ with aba4:
                     "text/csv",
                     key=f"download_{base_selecionada}_{fabrica}"
                 )
+
+
+    st.divider()
+
+    st.subheader("Editar endereço de fábrica já salva")
+
+    bases_para_editar = pd.read_sql_query("""
+    SELECT DISTINCT cliente_base
+    FROM registros
+    WHERE cliente_base IS NOT NULL
+    AND cliente_base != ''
+    ORDER BY cliente_base
+    """, conn)
+
+    if bases_para_editar.empty:
+        st.info("Nenhuma base disponível para edição de endereço.")
+    else:
+        base_editar = st.selectbox(
+            "Base / Cliente para editar endereço",
+            bases_para_editar["cliente_base"].tolist(),
+            key="editar_endereco_base"
+        )
+
+        fabricas_para_editar = pd.read_sql_query("""
+        SELECT
+            fabrica,
+            MAX(ce_bri) AS ce_bri,
+            MAX(endereco_fabrica) AS endereco_fabrica
+        FROM registros
+        WHERE cliente_base = ?
+        GROUP BY fabrica
+        ORDER BY fabrica
+        """, conn, params=(base_editar,))
+
+        if fabricas_para_editar.empty:
+            st.info("Nenhuma fábrica encontrada nessa base.")
+        else:
+            opcoes_fabricas = fabricas_para_editar["fabrica"].tolist()
+
+            fabrica_editar = st.selectbox(
+                "Fábrica para editar endereço",
+                opcoes_fabricas,
+                key="editar_endereco_fabrica"
+            )
+
+            linha_fabrica = fabricas_para_editar[
+                fabricas_para_editar["fabrica"] == fabrica_editar
+            ].iloc[0]
+
+            st.caption(f"CE-BRI vinculado: {linha_fabrica.get('ce_bri', '')}")
+
+            endereco_atual = linha_fabrica.get("endereco_fabrica", "")
+
+            if pd.isna(endereco_atual):
+                endereco_atual = ""
+
+            novo_endereco = st.text_area(
+                "Endereço da fábrica",
+                value=str(endereco_atual),
+                height=120,
+                key="editar_endereco_texto"
+            )
+
+            if st.button("Salvar endereço desta fábrica", key="salvar_endereco_fabrica_existente"):
+                total_alterado = atualizar_endereco_fabrica_existente(
+                    base_editar,
+                    fabrica_editar,
+                    novo_endereco
+                )
+
+                st.success(f"Endereço atualizado em {total_alterado} registros da fábrica {fabrica_editar} ✅")
+
 
 # ==========================================
 # ABA 5 - PREENCHIMENTO DE CONFIRMAÇÃO
