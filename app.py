@@ -2111,11 +2111,114 @@ with aba3:
 with aba4:
     st.title("Registros")
 
+    st.subheader("Enviar Excel de Registros")
+
     cliente_base = st.text_input(
         "Nome da Base / Cliente",
         value="BOLSA",
         key="cliente_base_registros"
     )
+
+    st.info(
+        "Envie o Excel de registros. Cada aba será tratada como uma fábrica. "
+        "Depois de enviar, você poderá nomear cada fábrica antes de salvar no banco."
+    )
+
+    registro_excel = st.file_uploader(
+        "Envie o Excel de Registros",
+        type=["xlsx", "xls"],
+        key="excel_registros"
+    )
+
+    if registro_excel:
+        try:
+            excel = pd.ExcelFile(registro_excel)
+            abas = excel.sheet_names
+
+            st.success(f"{len(abas)} abas encontradas ✅")
+
+            st.subheader("Nomear Fábricas")
+            st.caption("Se quiser, altere o nome de cada fábrica antes de salvar. Exemplo: F01 - MOHNISH / CE-BRI-XXXX")
+
+            nomes_fabricas = {}
+
+            for aba in abas:
+                nome_sugerido = str(aba)
+
+                nomes_fabricas[aba] = st.text_input(
+                    f"Nome da fábrica para a aba: {aba}",
+                    value=nome_sugerido,
+                    key=f"nome_fabrica_{cliente_base}_{aba}"
+                )
+
+            todas_fabricas = []
+
+            for aba in abas:
+                df_filtrado = ler_registros_aba(
+                    registro_excel,
+                    aba
+                )
+
+                if df_filtrado is None or df_filtrado.empty:
+                    continue
+
+                nome_final_fabrica = clean(nomes_fabricas.get(aba, aba)) or str(aba)
+
+                # Mantém o CE-BRI extraído da aba original, mas salva a fábrica com o nome escolhido.
+                df_filtrado["FABRICA"] = nome_final_fabrica
+
+                st.subheader(f"Prévia: {cliente_base} → {nome_final_fabrica}")
+
+                st.dataframe(
+                    df_filtrado,
+                    use_container_width=True
+                )
+
+                todas_fabricas.append(df_filtrado)
+
+            if todas_fabricas:
+                banco_registros = pd.concat(
+                    todas_fabricas,
+                    ignore_index=True
+                )
+
+                st.divider()
+
+                st.subheader("Banco Geral de Registros que será salvo")
+
+                st.dataframe(
+                    banco_registros,
+                    use_container_width=True
+                )
+
+                if st.button("Salvar registros desta base", key="salvar_registros_base"):
+                    total_salvo = salvar_registros_no_banco(
+                        banco_registros,
+                        registro_excel.name
+                    )
+
+                    st.success(f"{total_salvo} registros salvos no banco para a base {cliente_base} ✅")
+
+                st.download_button(
+                    "Baixar registros tratados CSV",
+                    banco_registros.to_csv(
+                        index=False,
+                        sep=";"
+                    ).encode(
+                        "ISO-8859-1",
+                        errors="replace"
+                    ),
+                    "registros_tratados.csv",
+                    "text/csv"
+                )
+
+            else:
+                st.warning("Nenhum registro válido encontrado no Excel.")
+
+        except Exception as e:
+            st.error(f"Erro ao ler Excel: {e}")
+
+    st.divider()
 
     st.subheader("Backup dos Registros / Banco")
 
@@ -2160,6 +2263,8 @@ with aba4:
 
     st.divider()
 
+    st.subheader("Visualizar Bases")
+
     bases_existentes = pd.read_sql_query("""
     SELECT DISTINCT cliente_base
     FROM registros
@@ -2168,10 +2273,9 @@ with aba4:
     ORDER BY cliente_base
     """, conn)
 
-    if not bases_existentes.empty:
-
-        st.subheader("Visualizar Bases")
-
+    if bases_existentes.empty:
+        st.info("Nenhuma base salva ainda.")
+    else:
         base_selecionada = st.selectbox(
             "Selecione a base",
             bases_existentes["cliente_base"].tolist(),
@@ -2193,103 +2297,30 @@ with aba4:
         fabricas = registros_base["fabrica"].unique().tolist()
 
         for fabrica in fabricas:
-
             bloco = registros_base[
                 registros_base["fabrica"] == fabrica
             ]
 
-            st.subheader(f"{base_selecionada} → {fabrica}")
-
-            st.dataframe(
-                bloco[[
-                    "familia",
-                    "registro",
-                    "ce_bri"
-                ]],
-                use_container_width=True
-            )
-
-    st.divider()
-
-    st.info(
-        "Envie o Excel de registros. Cada aba será tratada como uma fábrica. "
-        "O sistema vai procurar automaticamente as colunas FAMÍLIA e REGISTRO."
-    )
-
-    registro_excel = st.file_uploader(
-        "Envie o Excel de Registros",
-        type=["xlsx", "xls"],
-        key="excel_registros"
-    )
-
-    if registro_excel:
-        try:
-            excel = pd.ExcelFile(registro_excel)
-            abas = excel.sheet_names
-
-            st.success(f"{len(abas)} abas encontradas ✅")
-
-            todas_fabricas = []
-
-            for aba in abas:
-                df_filtrado = ler_registros_aba(
-                    registro_excel,
-                    aba
-                )
-
-                if df_filtrado is None or df_filtrado.empty:
-                    continue
-
-                st.subheader(f"Fábrica: {aba}")
-
+            with st.expander(f"{base_selecionada} → {fabrica}", expanded=False):
                 st.dataframe(
-                    df_filtrado,
+                    bloco[[
+                        "familia",
+                        "registro",
+                        "ce_bri"
+                    ]],
                     use_container_width=True
                 )
-
-                todas_fabricas.append(df_filtrado)
-
-            if todas_fabricas:
-                banco_registros = pd.concat(
-                    todas_fabricas,
-                    ignore_index=True
-                )
-
-                st.divider()
-
-                st.subheader("Banco Geral de Registros")
-
-                st.dataframe(
-                    banco_registros,
-                    use_container_width=True
-                )
-
-                total_salvo = salvar_registros_no_banco(
-                    banco_registros,
-                    registro_excel.name
-                )
-
-                st.success(f"{total_salvo} registros salvos no banco ✅")
 
                 st.download_button(
-                    "Baixar registros tratados CSV",
-                    banco_registros.to_csv(
-                        index=False,
-                        sep=";"
-                    ).encode(
+                    f"Baixar CSV - {fabrica}",
+                    bloco.to_csv(index=False, sep=";").encode(
                         "ISO-8859-1",
                         errors="replace"
                     ),
-                    "registros_tratados.csv",
-                    "text/csv"
+                    f"{base_selecionada}_{str(fabrica).replace('/', '-')}.csv",
+                    "text/csv",
+                    key=f"download_{base_selecionada}_{fabrica}"
                 )
-
-            else:
-                st.warning("Nenhum registro válido encontrado no Excel.")
-
-        except Exception as e:
-            st.error(f"Erro ao ler Excel: {e}")
-
 
 # ==========================================
 # ABA 5 - PREENCHIMENTO DE CONFIRMAÇÃO
