@@ -1372,6 +1372,8 @@ def buscar_item_confirmacao(valor_ref):
     if not ref:
         return None
 
+    # Busca segura: a célula verde é a REFERÊNCIA EXATA.
+    # Não busca por código de barras, nome, marca ou aproximação.
     resultado = pd.read_sql_query("""
     SELECT
         i.marca AS MARCA,
@@ -1387,20 +1389,10 @@ def buscar_item_confirmacao(valor_ref):
     LEFT JOIN registros r
     ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
     AND r.familia = c.familia
-    WHERE i.modelo LIKE ?
-       OR i.codigo LIKE ?
-       OR i.nome LIKE ?
-       OR i.marca LIKE ?
-       OR c.ip_bri LIKE ?
+    WHERE UPPER(TRIM(i.modelo)) = UPPER(TRIM(?))
     ORDER BY c.rev DESC, c.ip_bri DESC
     LIMIT 1
-    """, conn, params=(
-        f"%{ref}%",
-        f"%{ref}%",
-        f"%{ref}%",
-        f"%{ref}%",
-        f"%{ref}%"
-    ))
+    """, conn, params=(ref,))
 
     if resultado.empty:
         return None
