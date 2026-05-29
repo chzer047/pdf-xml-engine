@@ -286,6 +286,56 @@ def filtrar_resultado_por_referencia_exata(df, ref_busca):
     ].copy()
 
 
+
+def codigo_barras_para_texto(valor, number_format=None):
+    """
+    Converte código de barras para texto preservando zeros à esquerda quando possível.
+
+    Problema:
+    Excel pode armazenar 0789123456789 como número 789123456789.
+    Se a célula tiver formato 0000000000000, reconstruímos o zero perdido com zfill.
+    """
+
+    if valor is None:
+        return None
+
+    texto = str(valor).strip()
+
+    if texto.lower() in ["", "nan", "none", "null"]:
+        return None
+
+    # Remove .0 quando veio de número inteiro lido como float.
+    if re.fullmatch(r"\d+\.0", texto):
+        texto = texto[:-2]
+
+    # Primeiro trecho quando vier "codigo/codigo"
+    texto = re.split(r"[\/\n]", texto)[0]
+
+    digitos = re.sub(r"\D", "", texto)
+
+    if not digitos:
+        return None
+
+    # Se a célula Excel tem formatação do tipo 0000000000000,
+    # usa a quantidade de zeros do formato para restaurar zeros à esquerda.
+    if number_format:
+        fmt = str(number_format)
+
+        # Pega o maior bloco contínuo de zeros do formato.
+        blocos_zeros = re.findall(r"0{8,14}", fmt)
+
+        if blocos_zeros:
+            tamanho = max(len(b) for b in blocos_zeros)
+
+            if len(digitos) < tamanho:
+                digitos = digitos.zfill(tamanho)
+
+    if len(digitos) < 8 or len(digitos) > 14:
+        return None
+
+    return digitos
+
+
 def corrigir_texto(texto):
     if texto is None:
         return ""
@@ -295,20 +345,7 @@ def corrigir_texto(texto):
 
 
 def extrair_codigo_unico(codigo_raw):
-    if not codigo_raw:
-        return None
-
-    codigo = re.split(r"[\/\n]", codigo_raw)[0]
-    codigo = re.sub(r"\D", "", codigo)
-
-    if not codigo or not codigo.isdigit():
-        return None
-
-    if len(codigo) < 8 or len(codigo) > 14:
-        return None
-
-    return codigo
-
+    return codigo_barras_para_texto(codigo_raw)
 
 
 def limitar_nome(nome):
@@ -526,7 +563,7 @@ def gerar_xml(df, sufixo):
 <Modelo>{escape_xml(modelo)}</Modelo>
 <Nome>{escape_xml(limitar_nome(r['NOME']))}</Nome>
 <CodigosBarras>
-<Codigo>{r['CODIGO']}</Codigo>
+<Codigo>{str(r['CODIGO'])}</Codigo>
 </CodigosBarras>
 </ItemSolicitacao>
 """)
@@ -1668,7 +1705,12 @@ def preencher_excel_confirmacao(uploaded_file):
                 if valor == "" or valor.lower() == "nan":
                     continue
 
-                cell.value = valor
+                if campo == "CODIGO":
+                    cell.number_format = "@"
+                    cell.value = str(valor)
+                else:
+                    cell.value = valor
+
                 preenchidos += 1
 
     output = BytesIO()
@@ -2103,17 +2145,8 @@ def valor_valido_item_s5(valor):
     return True
 
 
-def codigo_barras_valido_s5(valor):
-    codigo = extrair_codigo_unico(valor)
-
-    if not codigo:
-        return None
-
-    if len(codigo) < 8 or len(codigo) > 14:
-        return None
-
-    return codigo
-
+def codigo_barras_valido_s5(valor, number_format=None):
+    return codigo_barras_para_texto(valor, number_format)
 
 
 def familia_desconsiderada_s5(nome_aba):
@@ -2191,94 +2224,101 @@ def corrigir_marca_codigo_invertidos_s5(marca, codigo_raw):
 
 def ler_excel_inclusao_sistema5(uploaded_file):
     """
-    Leitor específico do Sistema 5.
+    Leitor específico do Sistema 5 com preservação de código de barras.
 
-    Estrutura esperada:
-    - O Excel pode ter várias abas.
+    Principais cuidados:
+    - Lê todas as abas.
     - Cada aba representa uma família.
-    - Dentro de cada aba existem as colunas:
-      ITEM, MODELO / REFERÊNCIA, MARCA COMERCIALIZADA,
-      CÓDIGO DE BARRAS, DESCRIÇÃO TÉCNICA.
-
-    Regras:
-    - Só considera linha real se tiver MODELO + MARCA + CÓDIGO + DESCRIÇÃO.
-    - Ignora observações, assinaturas, local/data, rodapé e linhas soltas.
+    - Ignora abas DESCONSIDERADO/DESCONSIDERADA.
+    - Preserva códigos de barras que começam com 0 usando o number_format do Excel.
+    - Corrige casos em que MARCA e CÓDIGO vêm invertidos.
     """
 
     try:
-        excel = pd.ExcelFile(uploaded_file)
+        uploaded_file.seek(0)
+    except Exception:
+        pass
+
+    try:
+        wb = load_workbook(uploaded_file, data_only=True)
     except Exception:
         return pd.DataFrame()
 
     todos_itens = []
 
-    for aba in excel.sheet_names:
-        # Se a aba/família estiver marcada como DESCONSIDERADO,
-        # nenhum item desta família será cadastrado.
+    for ws in wb.worksheets:
+        aba = ws.title
+
         if familia_desconsiderada_s5(aba):
             continue
 
-        try:
-            bruto = pd.read_excel(
-                uploaded_file,
-                sheet_name=aba,
-                header=None,
-                dtype=object
-            )
-        except Exception:
-            continue
-
-        if bruto.empty:
-            continue
-
-        header_idx = None
+        header_row_idx = None
         colunas = {}
 
-        for i, row in bruto.iterrows():
+        for row in ws.iter_rows():
             temp = {}
 
-            for idx, valor in enumerate(row.values):
-                nome = normalizar_coluna_excel_s5(valor)
+            for cell in row:
+                nome = normalizar_coluna_excel_s5(cell.value)
 
                 if nome == "ITEM":
-                    temp["ITEM"] = idx
+                    temp["ITEM"] = cell.column
                 elif nome == "MODELO":
-                    temp["MODELO"] = idx
+                    temp["MODELO"] = cell.column
                 elif nome == "MARCA":
-                    temp["MARCA"] = idx
+                    temp["MARCA"] = cell.column
                 elif nome == "CODIGO":
-                    temp["CODIGO"] = idx
+                    temp["CODIGO"] = cell.column
                 elif nome == "NOME":
-                    temp["NOME"] = idx
+                    temp["NOME"] = cell.column
 
-            # Cabeçalho real precisa ter os campos centrais.
             if all(campo in temp for campo in ["MODELO", "MARCA", "CODIGO", "NOME"]):
-                header_idx = i
+                header_row_idx = row[0].row
                 colunas = temp
                 break
 
-        if header_idx is None:
+        if header_row_idx is None:
             continue
 
-        for j in range(header_idx + 1, len(bruto)):
-            row = bruto.iloc[j]
+        for row_idx in range(header_row_idx + 1, ws.max_row + 1):
+            def cell_col(nome_coluna):
+                col = colunas.get(nome_coluna)
+                if not col:
+                    return None
+                return ws.cell(row_idx, col)
 
             def valor_coluna(nome_coluna):
-                idx = colunas.get(nome_coluna)
-                if idx is None or idx >= len(row):
+                cell = cell_col(nome_coluna)
+                if cell is None:
                     return ""
-                return clean(row.iloc[idx])
+                return clean(cell.value)
 
             item = valor_coluna("ITEM")
             modelo = valor_coluna("MODELO")
             marca = valor_coluna("MARCA")
-            codigo_raw = valor_coluna("CODIGO")
             nome = valor_coluna("NOME")
 
-            # Corrige automaticamente quando o Excel vem com MARCA e CÓDIGO invertidos.
-            marca, codigo_raw = corrigir_marca_codigo_invertidos_s5(marca, codigo_raw)
+            marca_cell = cell_col("MARCA")
+            codigo_cell = cell_col("CODIGO")
 
-            codigo = codigo_barras_valido_s5(codigo_raw)
+            marca_raw = clean(marca_cell.value) if marca_cell else ""
+            codigo_raw = clean(codigo_cell.value) if codigo_cell else ""
+
+            # Caso normal: código está na coluna de código.
+            codigo = codigo_barras_para_texto(
+                codigo_cell.value if codigo_cell else codigo_raw,
+                codigo_cell.number_format if codigo_cell else None
+            )
+
+            # Caso especial: código e marca vieram invertidos.
+            if parece_codigo_barras_s5(marca_raw) and parece_marca_s5(codigo_raw):
+                marca = codigo_raw
+                codigo = codigo_barras_para_texto(
+                    marca_cell.value if marca_cell else marca_raw,
+                    marca_cell.number_format if marca_cell else None
+                )
+            else:
+                marca = marca_raw
 
             linha_texto = " ".join([modelo, marca, codigo_raw, nome]).upper()
 
@@ -2299,7 +2339,6 @@ def ler_excel_inclusao_sistema5(uploaded_file):
             if any(p in linha_texto for p in palavras_ignorar):
                 continue
 
-            # Linha real precisa ter os 4 campos principais válidos.
             if not valor_valido_item_s5(modelo):
                 continue
 
@@ -2309,11 +2348,9 @@ def ler_excel_inclusao_sistema5(uploaded_file):
             if not valor_valido_item_s5(nome):
                 continue
 
-            # Código precisa ser código de barras válido, com 8 a 14 dígitos.
             if not codigo:
                 continue
 
-            # Evita linhas de complemento/rodapé que não são itens reais.
             if marca.upper().strip() in ["DIRETA", "INDIRETA"]:
                 continue
 
@@ -2323,7 +2360,6 @@ def ler_excel_inclusao_sistema5(uploaded_file):
             if nome.upper().strip() in ["DIRETA", "INDIRETA"]:
                 continue
 
-            # Evita cabeçalho repetido
             if normalizar_coluna_excel_s5(modelo) == "MODELO":
                 continue
 
@@ -3205,6 +3241,168 @@ def diagnosticar_referencia_confirmacao(ref):
         "candidatos_sistema5": candidatos
     }
 
+
+
+# ==========================================
+# AUDITORIA / CORREÇÃO DE CÓDIGOS DE BARRAS
+# ==========================================
+
+def listar_codigos_suspeitos_sistema5():
+    """
+    Lista códigos do Sistema 5 que podem ter perdido zero à esquerda.
+    Principal suspeita: códigos com menos de 13 dígitos.
+    """
+    return pd.read_sql_query("""
+    SELECT
+        id,
+        cliente_base,
+        fabrica,
+        ce_bri,
+        familia,
+        item,
+        marca,
+        modelo,
+        nome,
+        codigo,
+        LENGTH(codigo) AS tamanho_codigo,
+        ip_processo,
+        arquivo_nome,
+        data_upload
+    FROM sistema5_itens
+    WHERE codigo IS NOT NULL
+    AND codigo != ''
+    AND (
+        LENGTH(codigo) < 13
+        OR codigo LIKE '%.0'
+    )
+    ORDER BY cliente_base, fabrica, CAST(familia AS INTEGER), modelo
+    """, conn)
+
+
+def listar_codigos_suspeitos_certificados():
+    """
+    Lista códigos dos certificados oficiais que podem ter perdido zero à esquerda.
+    """
+    return pd.read_sql_query("""
+    SELECT
+        i.id,
+        c.ip_bri,
+        c.ce_bri,
+        c.familia,
+        i.ordem,
+        i.marca,
+        i.modelo,
+        i.nome,
+        i.codigo,
+        LENGTH(i.codigo) AS tamanho_codigo,
+        c.arquivo_pdf,
+        c.data_cadastro
+    FROM itens i
+    INNER JOIN certificados c
+    ON c.id = i.certificado_id
+    WHERE i.codigo IS NOT NULL
+    AND i.codigo != ''
+    AND (
+        LENGTH(i.codigo) < 13
+        OR i.codigo LIKE '%.0'
+    )
+    ORDER BY c.ip_bri, i.ordem
+    """, conn)
+
+
+def atualizar_codigo_sistema5_por_id(item_id, novo_codigo):
+    item_id = int(item_id)
+    codigo = codigo_barras_para_texto(novo_codigo)
+
+    if not codigo:
+        return False, "Código inválido. Informe um código com 8 a 14 dígitos."
+
+    cursor.execute("""
+    UPDATE sistema5_itens
+    SET codigo = ?
+    WHERE id = ?
+    """, (codigo, item_id))
+
+    conn.commit()
+    return True, f"Código atualizado no Sistema 5: {codigo}"
+
+
+def atualizar_codigo_certificado_por_id(item_id, novo_codigo):
+    item_id = int(item_id)
+    codigo = codigo_barras_para_texto(novo_codigo)
+
+    if not codigo:
+        return False, "Código inválido. Informe um código com 8 a 14 dígitos."
+
+    cursor.execute("""
+    UPDATE itens
+    SET codigo = ?
+    WHERE id = ?
+    """, (codigo, item_id))
+
+    conn.commit()
+    return True, f"Código atualizado no banco de certificados: {codigo}"
+
+
+def aplicar_zero_esquerda_sistema5_por_id(item_id, tamanho_final=13):
+    item_id = int(item_id)
+    tamanho_final = int(tamanho_final)
+
+    atual = cursor.execute("""
+    SELECT codigo
+    FROM sistema5_itens
+    WHERE id = ?
+    """, (item_id,)).fetchone()
+
+    if not atual:
+        return False, "Item não encontrado."
+
+    codigo_atual = re.sub(r"\D", "", clean(atual[0]))
+
+    if not codigo_atual:
+        return False, "Código atual inválido."
+
+    novo_codigo = codigo_atual.zfill(tamanho_final)
+
+    cursor.execute("""
+    UPDATE sistema5_itens
+    SET codigo = ?
+    WHERE id = ?
+    """, (novo_codigo, item_id))
+
+    conn.commit()
+    return True, f"Código corrigido: {codigo_atual} → {novo_codigo}"
+
+
+def aplicar_zero_esquerda_certificado_por_id(item_id, tamanho_final=13):
+    item_id = int(item_id)
+    tamanho_final = int(tamanho_final)
+
+    atual = cursor.execute("""
+    SELECT codigo
+    FROM itens
+    WHERE id = ?
+    """, (item_id,)).fetchone()
+
+    if not atual:
+        return False, "Item não encontrado."
+
+    codigo_atual = re.sub(r"\D", "", clean(atual[0]))
+
+    if not codigo_atual:
+        return False, "Código atual inválido."
+
+    novo_codigo = codigo_atual.zfill(tamanho_final)
+
+    cursor.execute("""
+    UPDATE itens
+    SET codigo = ?
+    WHERE id = ?
+    """, (novo_codigo, item_id))
+
+    conn.commit()
+    return True, f"Código corrigido: {codigo_atual} → {novo_codigo}"
+
 # ==========================================
 # TABS
 # ==========================================
@@ -3249,7 +3447,7 @@ try:
 except Exception as e:
     st.sidebar.warning(f"Backup geral indisponível: {e}")
 
-aba0, aba1, aba2, aba3, aba4, aba5, aba6, aba7, aba8 = st.tabs([
+aba0, aba1, aba2, aba3, aba4, aba5, aba6, aba7, aba8, aba9 = st.tabs([
     "🏠 Início",
     "PDF → XML",
     "Banco de Certificados",
@@ -3258,7 +3456,8 @@ aba0, aba1, aba2, aba3, aba4, aba5, aba6, aba7, aba8 = st.tabs([
     "Pesquisa Avançada",
     "Sistema 5",
     "IP-BRI Pendentes",
-    "Painel de Cobertura"
+    "Painel de Cobertura",
+    "Correção de Códigos"
 ])
 
 # ==========================================
@@ -5248,4 +5447,188 @@ with aba8:
                     "text/csv",
                     key="download_cobertura_itens_familia"
                 )
+
+
+
+# ==========================================
+# ABA 9 - CORREÇÃO DE CÓDIGOS DE BARRAS
+# ==========================================
+
+with aba9:
+    st.title("Correção de Códigos de Barras")
+
+    st.warning(
+        "Use esta aba para auditar códigos que podem ter perdido zero à esquerda. "
+        "O sistema NÃO corrige tudo sozinho sem confirmação, para evitar alterar códigos válidos por engano."
+    )
+
+    st.subheader("Códigos suspeitos no Sistema 5")
+
+    suspeitos_s5 = listar_codigos_suspeitos_sistema5()
+
+    if suspeitos_s5.empty:
+        st.success("Nenhum código suspeito encontrado no Sistema 5 ✅")
+    else:
+        st.warning(f"{len(suspeitos_s5)} código(s) suspeito(s) no Sistema 5.")
+        st.dataframe(suspeitos_s5, use_container_width=True)
+
+        st.download_button(
+            "Baixar suspeitos Sistema 5 CSV",
+            suspeitos_s5.to_csv(index=False, sep=";").encode("ISO-8859-1", errors="replace"),
+            "codigos_suspeitos_sistema5.csv",
+            "text/csv",
+            key="download_suspeitos_s5"
+        )
+
+        st.divider()
+        st.subheader("Corrigir item do Sistema 5")
+
+        opcoes_s5 = []
+        for _, linha in suspeitos_s5.iterrows():
+            label = (
+                f"ID {linha.get('id')} | "
+                f"{linha.get('modelo', '')} | "
+                f"{linha.get('codigo', '')} | "
+                f"{linha.get('arquivo_nome', '')}"
+            )
+            opcoes_s5.append(label)
+
+        escolha_s5 = st.selectbox(
+            "Selecione o item suspeito do Sistema 5",
+            opcoes_s5,
+            key="select_codigo_suspeito_s5"
+        )
+
+        idx_s5 = opcoes_s5.index(escolha_s5)
+        linha_s5 = suspeitos_s5.iloc[idx_s5]
+
+        st.caption("Dados do item selecionado")
+        st.code(
+            f"Modelo: {linha_s5.get('modelo', '')}\n"
+            f"Código atual: {linha_s5.get('codigo', '')}\n"
+            f"Família: {linha_s5.get('familia', '')}\n"
+            f"Arquivo: {linha_s5.get('arquivo_nome', '')}"
+        )
+
+        novo_codigo_s5 = st.text_input(
+            "Novo código correto",
+            value=str(linha_s5.get("codigo", "")),
+            key="novo_codigo_s5"
+        )
+
+        col_s5_a, col_s5_b = st.columns(2)
+
+        with col_s5_a:
+            if st.button("Salvar código manual no Sistema 5", key="salvar_codigo_manual_s5"):
+                ok, mensagem = atualizar_codigo_sistema5_por_id(
+                    linha_s5.get("id"),
+                    novo_codigo_s5
+                )
+                if ok:
+                    st.success(mensagem)
+                else:
+                    st.error(mensagem)
+
+        with col_s5_b:
+            tamanho_final_s5 = st.selectbox(
+                "Completar com zero à esquerda até",
+                [13, 14, 12],
+                key="tamanho_zero_s5"
+            )
+
+            if st.button("Aplicar zero à esquerda no Sistema 5", key="aplicar_zero_s5"):
+                ok, mensagem = aplicar_zero_esquerda_sistema5_por_id(
+                    linha_s5.get("id"),
+                    tamanho_final_s5
+                )
+                if ok:
+                    st.success(mensagem)
+                else:
+                    st.error(mensagem)
+
+    st.divider()
+
+    st.subheader("Códigos suspeitos nos Certificados Oficiais")
+
+    suspeitos_cert = listar_codigos_suspeitos_certificados()
+
+    if suspeitos_cert.empty:
+        st.success("Nenhum código suspeito encontrado nos certificados oficiais ✅")
+    else:
+        st.warning(f"{len(suspeitos_cert)} código(s) suspeito(s) nos certificados oficiais.")
+        st.dataframe(suspeitos_cert, use_container_width=True)
+
+        st.download_button(
+            "Baixar suspeitos Certificados CSV",
+            suspeitos_cert.to_csv(index=False, sep=";").encode("ISO-8859-1", errors="replace"),
+            "codigos_suspeitos_certificados.csv",
+            "text/csv",
+            key="download_suspeitos_certificados"
+        )
+
+        st.divider()
+        st.subheader("Corrigir item dos Certificados")
+
+        opcoes_cert = []
+        for _, linha in suspeitos_cert.iterrows():
+            label = (
+                f"ID {linha.get('id')} | "
+                f"{linha.get('ip_bri', '')} | "
+                f"{linha.get('modelo', '')} | "
+                f"{linha.get('codigo', '')}"
+            )
+            opcoes_cert.append(label)
+
+        escolha_cert = st.selectbox(
+            "Selecione o item suspeito dos certificados",
+            opcoes_cert,
+            key="select_codigo_suspeito_cert"
+        )
+
+        idx_cert = opcoes_cert.index(escolha_cert)
+        linha_cert = suspeitos_cert.iloc[idx_cert]
+
+        st.caption("Dados do item selecionado")
+        st.code(
+            f"IP-BRI: {linha_cert.get('ip_bri', '')}\n"
+            f"Modelo: {linha_cert.get('modelo', '')}\n"
+            f"Código atual: {linha_cert.get('codigo', '')}\n"
+            f"Família: {linha_cert.get('familia', '')}"
+        )
+
+        novo_codigo_cert = st.text_input(
+            "Novo código correto",
+            value=str(linha_cert.get("codigo", "")),
+            key="novo_codigo_cert"
+        )
+
+        col_cert_a, col_cert_b = st.columns(2)
+
+        with col_cert_a:
+            if st.button("Salvar código manual nos Certificados", key="salvar_codigo_manual_cert"):
+                ok, mensagem = atualizar_codigo_certificado_por_id(
+                    linha_cert.get("id"),
+                    novo_codigo_cert
+                )
+                if ok:
+                    st.success(mensagem)
+                else:
+                    st.error(mensagem)
+
+        with col_cert_b:
+            tamanho_final_cert = st.selectbox(
+                "Completar com zero à esquerda até",
+                [13, 14, 12],
+                key="tamanho_zero_cert"
+            )
+
+            if st.button("Aplicar zero à esquerda nos Certificados", key="aplicar_zero_cert"):
+                ok, mensagem = aplicar_zero_esquerda_certificado_por_id(
+                    linha_cert.get("id"),
+                    tamanho_final_cert
+                )
+                if ok:
+                    st.success(mensagem)
+                else:
+                    st.error(mensagem)
 
