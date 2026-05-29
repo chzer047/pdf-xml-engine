@@ -207,9 +207,8 @@ def clean(x):
 
 def normalizar_hifens_ref(valor):
     """
-    Mantém o hífen como parte da referência, mas padroniza hífens unicode
-    que visualmente parecem iguais.
-    NÃO transforma SK-126 em SK126.
+    Padroniza hífens unicode e espaços invisíveis, mas NÃO remove hífens.
+    Isso mantém SK-126 diferente de SK126.
     """
     texto = clean(valor).upper()
 
@@ -228,46 +227,53 @@ def normalizar_hifens_ref(valor):
 
 def extrair_referencia_inicial_modelo(modelo):
     """
-    Extrai a referência inicial do modelo.
-
-    Ex:
-    SK-126 - BRINQUEDO SANFONA -> SK-126
-    SK-1261 - BRINQUEDO -> SK-1261
-    SK126 - BRINQUEDO -> SK126
+    Mantida por compatibilidade, mas a comparação principal agora usa boundary.
     """
-
     texto = normalizar_hifens_ref(modelo)
-
     partes = re.split(r"\s+-\s+", texto, maxsplit=1)
-
     if partes:
         return partes[0].strip()
-
     return texto.strip()
 
 
 def modelo_corresponde_referencia_exata(modelo_banco, ref_busca):
     """
-    Regra rígida da confirmação:
+    Regra segura para confirmação:
 
-    SK-126 encontra:
-    - SK-126
-    - SK-126 - descrição
+    Aceita:
+    BAL-17-FAN-PR == BAL-17-FAN-PR
+    BAL-17-FAN-PR == BAL-17-FAN-PR - DESCRIÇÃO
+    BAL-17-FAN-PR == BAL-17-FAN-PR–DESCRIÇÃO
 
-    SK-126 NÃO encontra:
-    - SK126
-    - SK-1261
-    - SK-126A
-    - SK-126 B
+    Rejeita:
+    SK-126 != SK-1261
+    SK-126 != SK-126A
+    SK-126 != SK126
     """
 
-    ref_buscada = normalizar_hifens_ref(ref_busca)
-    ref_modelo = extrair_referencia_inicial_modelo(modelo_banco)
+    modelo = normalizar_hifens_ref(modelo_banco)
+    ref = normalizar_hifens_ref(ref_busca)
 
-    if not ref_buscada or not ref_modelo:
+    if not modelo or not ref:
         return False
 
-    return ref_modelo == ref_buscada
+    if modelo == ref:
+        return True
+
+    if not modelo.startswith(ref):
+        return False
+
+    resto = modelo[len(ref):]
+
+    if not resto:
+        return True
+
+    # Aceita somente se depois da referência vier um separador real de descrição.
+    # Ex: " - descrição", "- descrição"; hífens unicode já foram normalizados.
+    if re.match(r"^\s*-\s+.+", resto):
+        return True
+
+    return False
 
 
 def filtrar_resultado_por_referencia_exata(df, ref_busca):
@@ -1560,10 +1566,11 @@ def buscar_item_confirmacao(valor_ref):
     AND r.familia = c.familia
     WHERE UPPER(TRIM(i.modelo)) = UPPER(TRIM(?))
        OR UPPER(TRIM(i.modelo)) LIKE UPPER(TRIM(?) || ' -%')
+       OR UPPER(TRIM(i.modelo)) LIKE UPPER(TRIM(?) || '- %')
        OR UPPER(TRIM(i.modelo)) LIKE UPPER(TRIM(?) || '%')
     ORDER BY c.rev DESC, c.ip_bri DESC
     LIMIT 100
-    """, conn, params=(ref, ref, ref))
+    """, conn, params=(ref, ref, ref, ref))
 
     resultado = filtrar_resultado_por_referencia_exata(resultado, ref)
 
@@ -2480,10 +2487,11 @@ def buscar_item_sistema5_confirmacao(valor_ref):
     FROM sistema5_itens
     WHERE UPPER(TRIM(modelo)) = UPPER(TRIM(?))
        OR UPPER(TRIM(modelo)) LIKE UPPER(TRIM(?) || ' -%')
+       OR UPPER(TRIM(modelo)) LIKE UPPER(TRIM(?) || '- %')
        OR UPPER(TRIM(modelo)) LIKE UPPER(TRIM(?) || '%')
     ORDER BY COALESCE(data_processo, '1900-01-01') DESC, id DESC
     LIMIT 100
-    """, conn, params=(ref, ref, ref))
+    """, conn, params=(ref, ref, ref, ref))
 
     resultado = filtrar_resultado_por_referencia_exata(resultado, ref)
 
