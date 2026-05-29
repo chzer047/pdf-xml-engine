@@ -4815,7 +4815,6 @@ with aba7:
                 f"{linha.get('fabrica', '')} | "
                 f"{linha.get('ce_bri', '')} | "
                 f"FAM {linha.get('familia', '')} | "
-                f"REG {linha.get('registro', '')} | "
                 f"{linha.get('ip_processo', '')}"
             )
             opcoes_pendentes.append(label)
@@ -4834,7 +4833,18 @@ with aba7:
         with col_ip1:
             st.text_input("CE-BRI", value=clean(linha_escolhida.get("ce_bri", "")), disabled=True, key="ip_pendente_ce_bri")
             st.text_input("Família", value=clean(linha_escolhida.get("familia", "")), disabled=True, key="ip_pendente_familia")
-            st.text_input("Registro", value=clean(linha_escolhida.get("registro", "")), disabled=True, key="ip_pendente_registro")
+
+            registro_copiavel = clean(linha_escolhida.get("registro", ""))
+
+            st.text_input(
+                "Registro",
+                value=registro_copiavel,
+                key="ip_pendente_registro_copiavel"
+            )
+
+            if registro_copiavel:
+                st.caption("Registro para copiar:")
+                st.code(registro_copiavel)
 
         with col_ip2:
             novo_ip_bri_manual = st.text_input("IP-BRI a cadastrar", placeholder="Ex: IP-BRI-1550-26 ou 1550-26", key="novo_ip_bri_manual")
