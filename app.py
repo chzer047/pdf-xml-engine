@@ -4836,12 +4836,6 @@ with aba7:
 
             registro_copiavel = clean(linha_escolhida.get("registro", ""))
 
-            st.text_input(
-                "Registro",
-                value=registro_copiavel,
-                key="ip_pendente_registro_copiavel"
-            )
-
             if registro_copiavel:
                 st.caption("Registro para copiar:")
                 st.code(registro_copiavel)
