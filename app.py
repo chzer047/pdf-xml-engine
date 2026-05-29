@@ -1780,17 +1780,18 @@ def buscar_ip_bri_manual_familia(ce_bri, familia):
 
 def listar_ip_bri_pendentes_sistema5():
     return pd.read_sql_query("""
-    SELECT DISTINCT
+    SELECT
         s.cliente_base,
         s.categoria,
         s.fabrica,
         s.ce_bri,
         s.familia,
-        r.registro AS registro,
-        s.tipo_processo,
-        s.ip_processo,
-        s.data_processo,
-        s.arquivo_nome
+        MAX(r.registro) AS registro,
+        GROUP_CONCAT(DISTINCT s.tipo_processo) AS tipos_processo,
+        GROUP_CONCAT(DISTINCT s.ip_processo) AS ips_processos,
+        MAX(s.data_processo) AS ultima_data_processo,
+        COUNT(DISTINCT s.ip_processo) AS qtd_processos,
+        COUNT(*) AS qtd_itens
     FROM sistema5_itens s
     LEFT JOIN certificados c
     ON UPPER(c.ce_bri) = UPPER(s.ce_bri)
@@ -1807,76 +1808,17 @@ def listar_ip_bri_pendentes_sistema5():
     AND s.familia != ''
     AND c.ip_bri IS NULL
     AND m.ip_bri IS NULL
-    ORDER BY s.cliente_base, s.fabrica, CAST(s.familia AS INTEGER), s.data_processo DESC
+    GROUP BY
+        s.cliente_base,
+        s.categoria,
+        s.fabrica,
+        s.ce_bri,
+        s.familia
+    ORDER BY
+        s.cliente_base,
+        s.fabrica,
+        CAST(s.familia AS INTEGER)
     """, conn)
-
-
-
-def atualizar_ip_bri_manual_por_id(registro_id, novo_ip_bri, nova_observacao=""):
-    registro_id = int(registro_id)
-    novo_ip_bri = normalizar_ip_bri_manual(novo_ip_bri)
-    nova_observacao = clean(nova_observacao)
-
-    atual = cursor.execute("""
-    SELECT ce_bri, familia
-    FROM ip_bri_familias
-    WHERE id = ?
-    """, (registro_id,)).fetchone()
-
-    if not atual:
-        return False, "Cadastro manual não encontrado."
-
-    ce_bri_atual, familia_atual = atual
-
-    duplicado = cursor.execute("""
-    SELECT ce_bri, familia
-    FROM ip_bri_familias
-    WHERE UPPER(ip_bri) = UPPER(?)
-    AND id != ?
-    LIMIT 1
-    """, (novo_ip_bri, registro_id)).fetchone()
-
-    if duplicado:
-        return False, (
-            f"Este IP-BRI já está cadastrado em {duplicado[0]} / família {duplicado[1]}. "
-            f"Não é permitido repetir o mesmo IP-BRI em famílias diferentes."
-        )
-
-    cursor.execute("""
-    UPDATE ip_bri_familias
-    SET ip_bri = ?, observacao = ?, data_atualizacao = ?
-    WHERE id = ?
-    """, (
-        novo_ip_bri,
-        nova_observacao,
-        datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
-        registro_id
-    ))
-
-    conn.commit()
-    return True, f"Cadastro atualizado: {ce_bri_atual} / família {familia_atual} → {novo_ip_bri}."
-
-
-def excluir_ip_bri_manual_por_id(registro_id):
-    registro_id = int(registro_id)
-
-    atual = cursor.execute("""
-    SELECT ce_bri, familia, ip_bri
-    FROM ip_bri_familias
-    WHERE id = ?
-    """, (registro_id,)).fetchone()
-
-    if not atual:
-        return False, "Cadastro manual não encontrado."
-
-    cursor.execute("""
-    DELETE FROM ip_bri_familias
-    WHERE id = ?
-    """, (registro_id,))
-
-    conn.commit()
-    return True, f"Cadastro excluído: {atual[0]} / família {atual[1]} / {atual[2]}."
-
 
 def listar_ip_bri_manuais():
     return pd.read_sql_query("""
@@ -4876,7 +4818,7 @@ with aba7:
     st.title("IP-BRI Pendentes")
 
     st.info(
-        "Use esta aba para cadastrar manualmente o IP-BRI de famílias que aparecem no Sistema 5, "
+        "Use esta aba para cadastrar manualmente o IP-BRI de famílias agrupadas do Sistema 5, "
         "mas ainda não possuem certificado oficial emitido/cadastrado."
     )
 
@@ -4908,7 +4850,7 @@ with aba7:
                 f"{linha.get('fabrica', '')} | "
                 f"{linha.get('ce_bri', '')} | "
                 f"FAM {linha.get('familia', '')} | "
-                f"{linha.get('ip_processo', '')}"
+                f"{int(linha.get('qtd_processos', 0) or 0)} processo(s)"
             )
             opcoes_pendentes.append(label)
 
@@ -4932,6 +4874,12 @@ with aba7:
             if registro_copiavel:
                 st.caption("Registro para copiar:")
                 st.code(registro_copiavel)
+
+            st.caption("Processos vinculados a esta família:")
+            st.code(clean(linha_escolhida.get("ips_processos", "")))
+
+            st.caption("Quantidade de processos / itens:")
+            st.write(f"{int(linha_escolhida.get('qtd_processos', 0) or 0)} processo(s) | {int(linha_escolhida.get('qtd_itens', 0) or 0)} item(ns)")
 
         with col_ip2:
             novo_ip_bri_manual = st.text_input("IP-BRI a cadastrar", placeholder="Ex: IP-BRI-1550-26 ou 1550-26", key="novo_ip_bri_manual")
