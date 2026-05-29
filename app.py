@@ -67,7 +67,8 @@ CREATE TABLE IF NOT EXISTS itens (
     marca TEXT,
     modelo TEXT,
     nome TEXT,
-    codigo TEXT
+    codigo TEXT,
+    modelo_ref_key TEXT
 )
 """)
 
@@ -156,6 +157,7 @@ CREATE TABLE IF NOT EXISTS sistema5_itens (
     modelo TEXT,
     nome TEXT,
     codigo TEXT,
+    modelo_ref_key TEXT,
     arquivo_nome TEXT,
     data_upload TEXT
 )
@@ -184,6 +186,8 @@ cursor.execute("CREATE INDEX IF NOT EXISTS idx_certificados_ce_bri ON certificad
 cursor.execute("CREATE INDEX IF NOT EXISTS idx_certificados_ip_bri ON certificados(ip_bri)")
 cursor.execute("CREATE INDEX IF NOT EXISTS idx_s5_itens_modelo ON sistema5_itens(modelo)")
 cursor.execute("CREATE INDEX IF NOT EXISTS idx_s5_itens_arquivo_id ON sistema5_itens(arquivo_id)")
+cursor.execute("CREATE INDEX IF NOT EXISTS idx_s5_itens_modelo_ref_key ON sistema5_itens(modelo_ref_key)")
+cursor.execute("CREATE INDEX IF NOT EXISTS idx_itens_modelo_ref_key ON itens(modelo_ref_key)")
 cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_bri_familias_ce_fam ON ip_bri_familias(ce_bri, familia)")
 conn.commit()
 
@@ -334,6 +338,57 @@ def codigo_barras_para_texto(valor, number_format=None):
         return None
 
     return digitos
+
+
+
+def referencia_chave_exata(valor):
+    texto = normalizar_hifens_ref(valor) if "normalizar_hifens_ref" in globals() else clean(valor).upper()
+    return texto.strip()
+
+
+def referencia_inicial_chave_modelo(modelo):
+    texto = referencia_chave_exata(modelo)
+    partes = re.split(r"\s+-\s+", texto, maxsplit=1)
+    if partes:
+        return partes[0].strip()
+    return texto.strip()
+
+
+def atualizar_chaves_referencia_banco():
+    try:
+        pendentes_s5 = cursor.execute("""
+        SELECT id, modelo
+        FROM sistema5_itens
+        WHERE modelo IS NOT NULL
+        AND modelo != ''
+        AND (modelo_ref_key IS NULL OR modelo_ref_key = '')
+        LIMIT 10000
+        """).fetchall()
+
+        for item_id, modelo in pendentes_s5:
+            cursor.execute(
+                "UPDATE sistema5_itens SET modelo_ref_key = ? WHERE id = ?",
+                (referencia_inicial_chave_modelo(modelo), item_id)
+            )
+
+        pendentes_cert = cursor.execute("""
+        SELECT id, modelo
+        FROM itens
+        WHERE modelo IS NOT NULL
+        AND modelo != ''
+        AND (modelo_ref_key IS NULL OR modelo_ref_key = '')
+        LIMIT 10000
+        """).fetchall()
+
+        for item_id, modelo in pendentes_cert:
+            cursor.execute(
+                "UPDATE itens SET modelo_ref_key = ? WHERE id = ?",
+                (referencia_inicial_chave_modelo(modelo), item_id)
+            )
+
+        conn.commit()
+    except Exception:
+        pass
 
 
 def corrigir_texto(texto):
@@ -780,6 +835,8 @@ def garantir_estrutura_banco():
         ("registros", "data_cadastro", "TEXT"),
         ("sistema5_itens", "familia", "TEXT"),
         ("sistema5_itens", "item", "TEXT"),
+        ("sistema5_itens", "modelo_ref_key", "TEXT"),
+        ("itens", "modelo_ref_key", "TEXT"),
         ("ip_bri_familias", "ce_bri", "TEXT"),
         ("ip_bri_familias", "familia", "TEXT"),
         ("ip_bri_familias", "ip_bri", "TEXT"),
@@ -1580,16 +1637,16 @@ def normalizar_cabecalho(valor):
 
 def buscar_item_confirmacao(valor_ref):
     ref = clean(valor_ref)
-
     if not ref:
         return None
 
     item_s5 = buscar_item_sistema5_confirmacao(ref)
-
     if item_s5:
         return item_s5
 
-    candidatos = pd.read_sql_query("""
+    ref_key = referencia_chave_exata(ref)
+
+    resultado = pd.read_sql_query("""
     SELECT
         i.marca AS MARCA,
         i.modelo AS MODELO,
@@ -1605,10 +1662,33 @@ def buscar_item_confirmacao(valor_ref):
     LEFT JOIN registros r
     ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
     AND r.familia = c.familia
+    WHERE i.modelo_ref_key = ?
     ORDER BY c.rev DESC, c.ip_bri DESC
-    """, conn)
+    LIMIT 1
+    """, conn, params=(ref_key,))
 
-    resultado = filtrar_resultado_por_referencia_exata(candidatos, ref)
+    if resultado.empty:
+        candidatos = pd.read_sql_query("""
+        SELECT
+            i.marca AS MARCA,
+            i.modelo AS MODELO,
+            i.nome AS NOME,
+            i.codigo AS CODIGO,
+            c.ip_bri AS IP_BRI,
+            c.ce_bri AS CE_BRI,
+            r.registro AS REGISTRO,
+            r.endereco_fabrica AS ENDERECO
+        FROM itens i
+        INNER JOIN certificados c
+        ON c.id = i.certificado_id
+        LEFT JOIN registros r
+        ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
+        AND r.familia = c.familia
+        WHERE UPPER(i.modelo) LIKE UPPER(?)
+        ORDER BY c.rev DESC, c.ip_bri DESC
+        LIMIT 100
+        """, conn, params=(f"{ref}%",))
+        resultado = filtrar_resultado_por_referencia_exata(candidatos, ref)
 
     if resultado.empty:
         return None
@@ -2483,10 +2563,10 @@ def salvar_inclusao_sistema5(categoria, cliente_base, fabrica, ce_bri, endereco_
         cursor.execute("""
         INSERT INTO sistema5_itens (
             arquivo_id, cliente_base, categoria, fabrica, ce_bri, endereco_fabrica,
-            tipo_processo, ip_processo, data_processo, familia, item, marca, modelo, nome, codigo,
+            tipo_processo, ip_processo, data_processo, familia, item, marca, modelo, nome, codigo, modelo_ref_key,
             arquivo_nome, data_upload
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             arquivo_id,
             cliente_base,
@@ -2503,6 +2583,7 @@ def salvar_inclusao_sistema5(categoria, cliente_base, fabrica, ce_bri, endereco_
             clean(r.get("MODELO", "")),
             clean(r.get("NOME", "")),
             clean(r.get("CODIGO", "")),
+            referencia_inicial_chave_modelo(clean(r.get("MODELO", ""))),
             arquivo_nome,
             datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         ))
@@ -2514,13 +2595,12 @@ def salvar_inclusao_sistema5(categoria, cliente_base, fabrica, ce_bri, endereco_
 
 def buscar_item_sistema5_confirmacao(valor_ref):
     ref = clean(valor_ref)
-
     if not ref:
         return None
 
-    # Busca ampla no Sistema 5 e filtra em Python pela referência exata.
-    # Isso evita falha por hífen unicode, espaço invisível ou formatação diferente.
-    candidatos = pd.read_sql_query("""
+    ref_key = referencia_chave_exata(ref)
+
+    resultado = pd.read_sql_query("""
     SELECT
         marca AS MARCA,
         modelo AS MODELO,
@@ -2537,21 +2617,43 @@ def buscar_item_sistema5_confirmacao(valor_ref):
         arquivo_nome AS ARQUIVO_ORIGEM,
         id AS ID_SISTEMA5
     FROM sistema5_itens
+    WHERE modelo_ref_key = ?
     ORDER BY COALESCE(data_processo, '1900-01-01') DESC, id DESC
-    """, conn)
+    LIMIT 1
+    """, conn, params=(ref_key,))
 
-    resultado = filtrar_resultado_por_referencia_exata(candidatos, ref)
+    if resultado.empty:
+        candidatos = pd.read_sql_query("""
+        SELECT
+            marca AS MARCA,
+            modelo AS MODELO,
+            nome AS NOME,
+            codigo AS CODIGO,
+            ip_processo AS IP_PROCESSO,
+            ce_bri AS CE_BRI,
+            NULL AS REGISTRO,
+            endereco_fabrica AS ENDERECO,
+            fabrica AS FABRICA,
+            tipo_processo AS TIPO_PROCESSO,
+            data_processo AS DATA_PROCESSO,
+            familia AS FAMILIA,
+            arquivo_nome AS ARQUIVO_ORIGEM,
+            id AS ID_SISTEMA5
+        FROM sistema5_itens
+        WHERE UPPER(modelo) LIKE UPPER(?)
+        ORDER BY COALESCE(data_processo, '1900-01-01') DESC, id DESC
+        LIMIT 100
+        """, conn, params=(f"{ref}%",))
+        resultado = filtrar_resultado_por_referencia_exata(candidatos, ref)
 
     if resultado.empty:
         return None
 
     item = resultado.iloc[0].to_dict()
-
     ce_bri = clean(item.get("CE_BRI"))
     familia = clean(item.get("FAMILIA"))
 
     ip_bri_oficial = None
-
     if ce_bri and familia:
         oficial = pd.read_sql_query("""
         SELECT ip_bri
@@ -2561,7 +2663,6 @@ def buscar_item_sistema5_confirmacao(valor_ref):
         ORDER BY rev DESC, id DESC
         LIMIT 1
         """, conn, params=(ce_bri, familia))
-
         if not oficial.empty:
             ip_bri_oficial = clean(oficial.iloc[0]["ip_bri"])
 
@@ -2569,10 +2670,7 @@ def buscar_item_sistema5_confirmacao(valor_ref):
         item["IP_BRI"] = ip_bri_oficial
     else:
         ip_bri_manual = buscar_ip_bri_manual_familia(ce_bri, familia) if "buscar_ip_bri_manual_familia" in globals() else ""
-        if ip_bri_manual:
-            item["IP_BRI"] = ip_bri_manual
-        else:
-            item["IP_BRI"] = familia
+        item["IP_BRI"] = ip_bri_manual if ip_bri_manual else familia
 
     if ce_bri and familia:
         registro_complementar = pd.read_sql_query("""
@@ -2583,7 +2681,6 @@ def buscar_item_sistema5_confirmacao(valor_ref):
         ORDER BY id DESC
         LIMIT 1
         """, conn, params=(ce_bri, familia))
-
         if not registro_complementar.empty:
             item["REGISTRO"] = registro_complementar.iloc[0]["registro"]
 
