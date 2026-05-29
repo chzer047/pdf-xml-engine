@@ -179,6 +179,20 @@ CREATE TABLE IF NOT EXISTS ip_bri_familias (
 
 conn.commit()
 
+
+# Garante colunas novas antes de criar índices em bancos antigos
+try:
+    cursor.execute("ALTER TABLE sistema5_itens ADD COLUMN modelo_ref_key TEXT")
+    conn.commit()
+except sqlite3.OperationalError:
+    pass
+
+try:
+    cursor.execute("ALTER TABLE itens ADD COLUMN modelo_ref_key TEXT")
+    conn.commit()
+except sqlite3.OperationalError:
+    pass
+
 # Índices para performance em buscas por campo mais usados
 cursor.execute("CREATE INDEX IF NOT EXISTS idx_itens_codigo ON itens(codigo)")
 cursor.execute("CREATE INDEX IF NOT EXISTS idx_itens_modelo ON itens(modelo)")
