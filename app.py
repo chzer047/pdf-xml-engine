@@ -1403,6 +1403,10 @@ def normalizar_cabecalho(valor):
     texto = texto.replace("CÓDIGO", "CODIGO")
     texto = texto.replace("COD.", "CODIGO")
     texto = texto.replace("CÓD.", "CODIGO")
+    texto = texto.replace("IP DO PROCESSO", "IP_PROCESSO")
+    texto = texto.replace("IP_PROCESSO", "IP_PROCESSO")
+    texto = texto.replace("IP-PROCESSO", "IP_PROCESSO")
+    texto = texto.replace("IP PROCESSO", "IP_PROCESSO")
     texto = texto.replace("IP-BRI", "IP_BRI")
     texto = texto.replace("CE-BRI", "CE_BRI")
     texto = texto.replace("ENDEREÇO", "ENDERECO")
@@ -1464,7 +1468,7 @@ def descobrir_cabecalho_coluna(ws, row_idx, col_idx):
         cell = ws.cell(r, col_idx)
         valor = clean(cell.value)
 
-        if valor and (eh_azul(cell) or normalizar_cabecalho(valor) in ["MARCA", "MODELO", "NOME", "CODIGO", "IP_BRI", "CE_BRI", "REGISTRO", "ENDERECO", "FAMILIA", "ITEM", "TIPO_PROCESSO", "DATA_PROCESSO", "ARQUIVO_ORIGEM"]):
+        if valor and (eh_azul(cell) or normalizar_cabecalho(valor) in ["MARCA", "MODELO", "NOME", "CODIGO", "IP_BRI", "CE_BRI", "REGISTRO", "ENDERECO", "FAMILIA", "ITEM", "TIPO_PROCESSO", "DATA_PROCESSO", "ARQUIVO_ORIGEM", "IP_PROCESSO"]):
             return normalizar_cabecalho(valor)
 
     # Plano B: procura qualquer texto de cabeçalho acima
@@ -1472,7 +1476,7 @@ def descobrir_cabecalho_coluna(ws, row_idx, col_idx):
         valor = clean(ws.cell(r, col_idx).value)
         cab = normalizar_cabecalho(valor)
 
-        if cab in ["MARCA", "MODELO", "NOME", "CODIGO", "IP_BRI", "CE_BRI", "REGISTRO", "ENDERECO", "FAMILIA", "ITEM", "TIPO_PROCESSO", "DATA_PROCESSO", "ARQUIVO_ORIGEM"]:
+        if cab in ["MARCA", "MODELO", "NOME", "CODIGO", "IP_BRI", "CE_BRI", "REGISTRO", "ENDERECO", "FAMILIA", "ITEM", "TIPO_PROCESSO", "DATA_PROCESSO", "ARQUIVO_ORIGEM", "IP_PROCESSO"]:
             return cab
 
     return ""
@@ -1485,7 +1489,7 @@ def preencher_excel_confirmacao(uploaded_file):
     preenchidos = 0
     nao_encontrados = []
 
-    campos_validos = ["MARCA", "MODELO", "NOME", "CODIGO", "IP_BRI", "CE_BRI", "REGISTRO", "ENDERECO", "FAMILIA", "ITEM", "TIPO_PROCESSO", "DATA_PROCESSO", "ARQUIVO_ORIGEM"]
+    campos_validos = ["MARCA", "MODELO", "NOME", "CODIGO", "IP_BRI", "CE_BRI", "REGISTRO", "ENDERECO", "FAMILIA", "ITEM", "TIPO_PROCESSO", "DATA_PROCESSO", "ARQUIVO_ORIGEM", "IP_PROCESSO"]
 
     for ws in wb.worksheets:
         for row in ws.iter_rows():
@@ -2116,7 +2120,7 @@ def buscar_item_sistema5_confirmacao(valor_ref):
         modelo AS MODELO,
         nome AS NOME,
         codigo AS CODIGO,
-        ip_processo AS IP_BRI,
+        ip_processo AS IP_PROCESSO,
         ce_bri AS CE_BRI,
         NULL AS REGISTRO,
         endereco_fabrica AS ENDERECO,
@@ -2137,16 +2141,43 @@ def buscar_item_sistema5_confirmacao(valor_ref):
         return None
 
     item = resultado.iloc[0].to_dict()
-    ce_bri = item.get("CE_BRI")
 
-    if ce_bri:
+    ce_bri = clean(item.get("CE_BRI"))
+    familia = clean(item.get("FAMILIA"))
+
+    # REGRA:
+    # Se o item veio do Sistema 5, o IP do processo fica separado em IP_PROCESSO.
+    # O campo IP_BRI deve tentar puxar o IP-BRI oficial pelo CE-BRI + família.
+    # Se ainda não existir certificado oficial emitido, usa a família encontrada.
+    ip_bri_oficial = None
+
+    if ce_bri and familia:
+        oficial = pd.read_sql_query("""
+        SELECT ip_bri
+        FROM certificados
+        WHERE UPPER(ce_bri) = UPPER(?)
+        AND familia = ?
+        ORDER BY rev DESC, id DESC
+        LIMIT 1
+        """, conn, params=(ce_bri, familia))
+
+        if not oficial.empty:
+            ip_bri_oficial = clean(oficial.iloc[0]["ip_bri"])
+
+    if ip_bri_oficial:
+        item["IP_BRI"] = ip_bri_oficial
+    else:
+        item["IP_BRI"] = familia
+
+    if ce_bri and familia:
         registro_complementar = pd.read_sql_query("""
         SELECT registro
         FROM registros
         WHERE UPPER(ce_bri) = UPPER(?)
+        AND familia = ?
         ORDER BY id DESC
         LIMIT 1
-        """, conn, params=(ce_bri,))
+        """, conn, params=(ce_bri, familia))
 
         if not registro_complementar.empty:
             item["REGISTRO"] = registro_complementar.iloc[0]["registro"]
