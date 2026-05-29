@@ -1980,6 +1980,66 @@ def ler_excel_inclusao_sistema5(uploaded_file):
     return df_final
 
 
+def ip_processo_ja_existe_sistema5(ip_processo, cliente_base="", fabrica=""):
+    """
+    Retorna os processos já salvos com o mesmo IP.
+    Filtra por cliente_base e fabrica se informados.
+    """
+    ip = clean(ip_processo).upper()
+
+    where = ["UPPER(a.ip_processo) = ?"]
+    params = [ip]
+
+    if clean(cliente_base):
+        where.append("UPPER(c.cliente_base) = UPPER(?)")
+        params.append(clean(cliente_base))
+
+    if clean(fabrica):
+        where.append("UPPER(f.fabrica) = UPPER(?)")
+        params.append(clean(fabrica))
+
+    sql = f"""
+    SELECT
+        a.id AS arquivo_id,
+        c.categoria,
+        c.cliente_base,
+        f.fabrica,
+        a.tipo_processo,
+        a.ip_processo,
+        a.data_processo,
+        a.arquivo_nome,
+        COUNT(i.id) AS qtd_itens
+    FROM sistema5_arquivos a
+    INNER JOIN sistema5_clientes c ON c.id = a.cliente_id
+    INNER JOIN sistema5_fabricas f ON f.id = a.fabrica_id
+    LEFT JOIN sistema5_itens i ON i.arquivo_id = a.id
+    WHERE {" AND ".join(where)}
+    GROUP BY a.id
+    ORDER BY a.id DESC
+    """
+
+    return pd.read_sql_query(sql, conn, params=tuple(params))
+
+
+def deletar_processo_sistema5(arquivo_id):
+    """
+    Remove um processo do Sistema 5 e todos os seus itens.
+    Retorna o número de itens deletados.
+    """
+    arquivo_id = int(arquivo_id)
+
+    qtd = cursor.execute(
+        "SELECT COUNT(*) FROM sistema5_itens WHERE arquivo_id = ?",
+        (arquivo_id,)
+    ).fetchone()[0]
+
+    cursor.execute("DELETE FROM sistema5_itens WHERE arquivo_id = ?", (arquivo_id,))
+    cursor.execute("DELETE FROM sistema5_arquivos WHERE id = ?", (arquivo_id,))
+    conn.commit()
+
+    return qtd
+
+
 def salvar_inclusao_sistema5(categoria, cliente_base, fabrica, ce_bri, endereco_fabrica, tipo_processo, ip_processo, data_processo, arquivo_nome, df_itens):
     categoria = normalizar_categoria_sistema5(categoria)
     cliente_base = clean(cliente_base).upper()
@@ -3796,20 +3856,38 @@ with aba6:
                         if not clean(cliente_s5) or not clean(fabrica_s5):
                             st.error("Informe cliente e fábrica antes de salvar.")
                         else:
-                            total = salvar_inclusao_sistema5(
-                                categoria_s5,
-                                cliente_s5,
-                                fabrica_s5,
-                                ce_bri_s5,
-                                endereco_s5,
-                                tipo_s5,
+                            # Verifica se já existe processo com o mesmo IP para este cliente/fábrica
+                            duplicados_ip = ip_processo_ja_existe_sistema5(
                                 ip_extraido,
-                                data_s5,
-                                arquivo_s5.name,
-                                df_s5
+                                cliente_s5,
+                                fabrica_s5
                             )
 
-                            st.success(f"{total} itens salvos no Sistema 5 ✅")
+                            if not duplicados_ip.empty:
+                                st.error(
+                                    f"⛔ Já existe um processo salvo com o IP **{ip_extraido}** "
+                                    f"para este cliente/fábrica."
+                                )
+                                st.caption("Processo existente:")
+                                st.dataframe(duplicados_ip, use_container_width=True)
+                                st.info(
+                                    "Se quiser substituir, delete o processo existente na seção "
+                                    "**'Estrutura salva no Sistema 5'** abaixo e envie novamente."
+                                )
+                            else:
+                                total = salvar_inclusao_sistema5(
+                                    categoria_s5,
+                                    cliente_s5,
+                                    fabrica_s5,
+                                    ce_bri_s5,
+                                    endereco_s5,
+                                    tipo_s5,
+                                    ip_extraido,
+                                    data_s5,
+                                    arquivo_s5.name,
+                                    df_s5
+                                )
+                                st.success(f"{total} itens salvos no Sistema 5 ✅")
 
             except Exception as e:
                 st.error(f"Erro ao ler Excel do Sistema 5: {e}")
@@ -3887,6 +3965,24 @@ with aba6:
                                             "text/csv",
                                             key=f"download_itens_processo_{arquivo_id}"
                                         )
+
+                                    st.divider()
+                                    st.caption("🗑️ Remover este processo")
+                                    confirmar_del_proc = st.checkbox(
+                                        f"Confirmo que quero remover permanentemente este processo e seus {int(proc.get('qtd_itens', 0) or 0)} itens",
+                                        key=f"confirmar_del_proc_{arquivo_id}"
+                                    )
+                                    if confirmar_del_proc:
+                                        if st.button(
+                                            "🗑️ Deletar processo",
+                                            key=f"btn_del_proc_{arquivo_id}"
+                                        ):
+                                            try:
+                                                qtd_del = deletar_processo_sistema5(arquivo_id)
+                                                st.success(f"Processo {proc.get('ip_processo', '')} removido. {qtd_del} itens deletados ✅")
+                                                st.rerun()
+                                            except Exception as e:
+                                                st.error(f"Erro ao deletar: {e}")
 
         st.download_button(
             "Baixar resumo Sistema 5 CSV",
