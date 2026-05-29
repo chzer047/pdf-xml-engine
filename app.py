@@ -2388,7 +2388,8 @@ try:
 except Exception as e:
     st.sidebar.warning(f"Backup geral indisponível: {e}")
 
-aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
+aba0, aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
+    "🏠 Início",
     "PDF → XML",
     "Banco de Certificados",
     "Registros",
@@ -2398,8 +2399,162 @@ aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
 ])
 
 # ==========================================
-# ABA 1 - XML
+# ABA 0 - INÍCIO / COMO USAR
 # ==========================================
+
+with aba0:
+    st.title("C XML BR Engine")
+    st.caption("Sistema de gestão de certificados IP-BRI, geração de XML e preenchimento automático de confirmações.")
+
+    st.divider()
+
+    # Status rápido do banco
+    try:
+        total_certs_home = cursor.execute("SELECT COUNT(*) FROM certificados").fetchone()[0]
+        total_itens_home = cursor.execute("SELECT COUNT(*) FROM itens").fetchone()[0]
+        total_regs_home  = cursor.execute("SELECT COUNT(*) FROM registros").fetchone()[0]
+        total_s5_home    = cursor.execute("SELECT COUNT(*) FROM sistema5_itens").fetchone()[0]
+
+        st.subheader("📊 Status do banco")
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Certificados", total_certs_home)
+        c2.metric("Itens", total_itens_home)
+        c3.metric("Registros", total_regs_home)
+        c4.metric("Itens Sistema 5", total_s5_home)
+
+        if total_certs_home == 0:
+            st.warning("⚠️ O banco está vazio. Siga o fluxo abaixo para começar.")
+        else:
+            st.success("Banco com dados. Pronto para uso ✅")
+    except Exception:
+        pass
+
+    st.divider()
+
+    st.subheader("🗺️ Fluxo de uso recomendado")
+    st.caption("Siga esta ordem ao usar o sistema pela primeira vez ou ao cadastrar um novo cliente.")
+
+    col_p1, col_seta1, col_p2, col_seta2, col_p3, col_seta3, col_p4 = st.columns([3, 0.5, 3, 0.5, 3, 0.5, 3])
+
+    with col_p1:
+        st.markdown("""
+**Passo 1 — PDF → XML**
+
+Envie o PDF do certificado IP-BRI.
+
+O sistema extrai os itens, gera o XML e salva automaticamente no banco.
+
+➡️ Use a aba **PDF → XML**
+""")
+
+    with col_seta1:
+        st.markdown("<br><br><br>▶", unsafe_allow_html=True)
+
+    with col_p2:
+        st.markdown("""
+**Passo 2 — Registros**
+
+Envie o Excel de registros do cliente (fábricas, CE-BRI, números de registro).
+
+Cada aba do Excel é uma fábrica.
+
+➡️ Use a aba **Registros**
+""")
+
+    with col_seta2:
+        st.markdown("<br><br><br>▶", unsafe_allow_html=True)
+
+    with col_p3:
+        st.markdown("""
+**Passo 3 — Preenchimento**
+
+Envie o Excel de confirmação com células verdes (referências) e amarelas (campos a preencher).
+
+O sistema cruza com o banco e preenche automaticamente.
+
+➡️ Use a aba **Preenchimento de Confirmação**
+""")
+
+    with col_seta3:
+        st.markdown("<br><br><br>▶", unsafe_allow_html=True)
+
+    with col_p4:
+        st.markdown("""
+**Passo 4 — Pesquisa / Histórico**
+
+Consulte cruzamentos entre IP-BRI, registro e fábrica, ou veja o histórico de alterações de um certificado.
+
+➡️ Use a aba **Pesquisa Avançada** ou **Banco de Certificados**
+""")
+
+    st.divider()
+
+    st.subheader("📋 Referência rápida por aba")
+
+    with st.expander("PDF → XML — O que faz e quando usar"):
+        st.markdown("""
+- Lê o PDF do certificado e extrai os itens (MARCA, MODELO, NOME, CÓDIGO DE BARRAS)
+- Gera dois XMLs: um com vírgula e um com ponto no final do MODELO
+- Salva automaticamente o certificado no banco (IP-BRI, CE-BRI, FAMÍLIA, REV)
+- Se já existir um certificado com o mesmo IP-BRI e REV maior no banco, o envio é **ignorado**
+- **Atenção:** se o PDF não tiver IP-BRI identificável, o XML é gerado mas **não é salvo**
+""")
+
+    with st.expander("Banco de Certificados — O que faz e quando usar"):
+        st.markdown("""
+- Visualiza métricas gerais do banco (certificados, itens, marcas)
+- Permite enviar um PDF manualmente com confirmação antes de salvar
+- Pesquisa item por referência/modelo ou código de barras
+- Filtra todos os itens de uma marca específica
+- Consulta histórico de alterações por IP-BRI (itens novos, removidos, campos alterados)
+- Permite **remover** um certificado e seus itens permanentemente
+- Exporta o banco completo em CSV
+""")
+
+    with st.expander("Registros — O que faz e quando usar"):
+        st.markdown("""
+- Importa o Excel de registros de um cliente (fábricas, CE-BRI, famílias, números de registro)
+- Cada aba do Excel é tratada como uma fábrica — você pode renomear antes de salvar
+- Os registros são necessários para que o Preenchimento de Confirmação consiga encontrar o número de registro e endereço da fábrica
+- Permite editar o endereço de uma fábrica já cadastrada sem precisar reimportar tudo
+""")
+
+    with st.expander("Preenchimento de Confirmação — O que faz e quando usar"):
+        st.markdown("""
+- Recebe um Excel com células coloridas:
+  - 🟢 **Verde** = referência do produto (MODELO). O sistema busca no banco por este valor
+  - 🟡 **Amarelo** = campo a ser preenchido (MARCA, NOME, CODIGO, REGISTRO, ENDERECO, etc.)
+  - 🔵 **Azul** = cabeçalho da coluna (diz qual campo preencher nas amarelas abaixo)
+- A busca é feita primeiro no **Sistema 5**, depois nos **Certificados**
+- **Pré-requisito:** o banco precisa ter certificados e registros cadastrados
+""")
+
+    with st.expander("Pesquisa Avançada — O que faz e quando usar"):
+        st.markdown("""
+- Pesquisa bidirecional: dado um IP-BRI, retorna o registro/fábrica; dado um registro, retorna o IP-BRI
+- Útil para conferir rapidamente se um certificado está vinculado a um cliente
+""")
+
+    with st.expander("Sistema 5 — O que faz e quando usar"):
+        st.markdown("""
+- Módulo para processos mais recentes que ainda não têm certificado IP-BRI oficial
+- Importa Excel de inclusões/manutenções/recertificações com IP no nome do arquivo
+- Os itens salvos aqui também são buscados pelo Preenchimento de Confirmação
+- Organizado por categoria → cliente → fábrica → processo
+""")
+
+    st.divider()
+
+    st.subheader("💾 Backup")
+    st.markdown("""
+O banco de dados fica salvo no servidor do Streamlit. **Se o app reiniciar ou ficar inativo por muito tempo, os dados podem ser perdidos.**
+
+**Boas práticas:**
+- Baixe o backup geral pelo menu lateral sempre que terminar uma sessão de cadastro
+- Guarde o arquivo `.db` em um local seguro
+- Para restaurar, use o menu lateral → "Restaurar backup" e envie o arquivo `.db`
+""")
+    st.warning("⚠️ O Streamlit Cloud pode reiniciar o app a qualquer momento. Faça backup com frequência.")
 
 with aba1:
     st.title("PDF → XML")
@@ -3002,10 +3157,13 @@ with aba3:
         key="cliente_base_registros"
     )
 
-    st.info(
-        "Envie o Excel de registros. Cada aba será tratada como uma fábrica. "
-        "Depois de enviar, você poderá nomear cada fábrica antes de salvar no banco."
-    )
+    with st.expander("ℹ️ Como funciona esta aba"):
+        st.markdown("""
+- Envie o Excel de registros do cliente
+- Cada **aba do Excel** é tratada como uma fábrica separada
+- Você pode renomear cada fábrica e informar o endereço antes de salvar
+- Os registros vinculam o **CE-BRI** ao número de **registro** e à **fábrica**, permitindo que o Preenchimento de Confirmação preencha esses campos automaticamente
+""")
 
     registro_excel = st.file_uploader(
         "Envie o Excel de Registros",
@@ -3304,11 +3462,41 @@ with aba3:
 with aba4:
     st.title("Preenchimento de Confirmação")
 
-    st.info(
-        "Envie o Excel de confirmação. Qualquer célula verde será tratada como referência, "
-        "sem precisar de coluna chamada REF. A busca será feita SOMENTE no campo MODELO do banco. "
-        "As células amarelas serão preenchidas conforme o cabeçalho azul da coluna."
-    )
+    with st.expander("ℹ️ Como funciona esta aba"):
+        st.markdown("""
+- Envie o Excel de confirmação com células coloridas:
+  - 🟢 **Verde** → referência do produto (MODELO). O sistema busca este valor no banco
+  - 🟡 **Amarelo** → campo a ser preenchido (MARCA, NOME, CODIGO, REGISTRO, ENDERECO...)
+  - 🔵 **Azul** → cabeçalho da coluna (define o que preencher nas amarelas abaixo)
+- Não é necessário ter uma coluna chamada "REF" — qualquer célula verde é considerada referência
+- A busca é feita primeiro no **Sistema 5**, depois nos **Certificados**
+- **Pré-requisito:** o banco precisa ter certificados e registros cadastrados para o preenchimento funcionar
+""")
+
+    # Aviso de banco vazio — aba 4 não funciona sem dados
+    try:
+        _total_cert_aba4 = cursor.execute("SELECT COUNT(*) FROM certificados").fetchone()[0]
+        _total_s5_aba4   = cursor.execute("SELECT COUNT(*) FROM sistema5_itens").fetchone()[0]
+        _total_reg_aba4  = cursor.execute("SELECT COUNT(*) FROM registros").fetchone()[0]
+
+        if _total_cert_aba4 == 0 and _total_s5_aba4 == 0:
+            st.error(
+                "⛔ O banco não tem nenhum certificado cadastrado. "
+                "O preenchimento não vai encontrar nenhuma referência.\n\n"
+                "**O que fazer:** vá à aba **PDF → XML** e envie os certificados primeiro."
+            )
+        elif _total_reg_aba4 == 0:
+            st.warning(
+                "⚠️ O banco tem certificados, mas **nenhum registro de fábrica** cadastrado. "
+                "Os campos REGISTRO e ENDERECO não serão preenchidos.\n\n"
+                "**O que fazer:** vá à aba **Registros** e importe o Excel de registros do cliente."
+            )
+        else:
+            st.success(
+                f"Banco pronto: {_total_cert_aba4} certificado(s) + {_total_s5_aba4} item(ns) do Sistema 5 + {_total_reg_aba4} registro(s) de fábrica ✅"
+            )
+    except Exception:
+        pass
 
     arquivo_confirmacao = st.file_uploader(
         "Envie o Excel de confirmação",
@@ -3349,10 +3537,13 @@ with aba4:
 with aba5:
     st.title("Pesquisa Avançada")
 
-    st.info(
-        "Use esta aba para cruzar IP-BRI, registro, fábrica e endereço. "
-        "Você pode pesquisar pelo IP-BRI para descobrir o registro, ou pesquisar pelo registro para descobrir o IP-BRI."
-    )
+    with st.expander("ℹ️ Como funciona esta aba"):
+        st.markdown("""
+- Pesquise em **duas direções**:
+  - Dado um **IP-BRI** → descubra o registro, fábrica e endereço vinculados
+  - Dado um **REGISTRO** → descubra o IP-BRI e o fabricante
+- Útil para conferir rapidamente se um certificado está vinculado a um cliente antes do preenchimento
+""")
 
     tipo_pesquisa_avancada = st.radio(
         "O que você quer pesquisar?",
@@ -3424,10 +3615,15 @@ with aba5:
 with aba6:
     st.title("Sistema 5")
 
-    st.info(
-        "Módulo de teste para processos mais recentes que o certificado oficial. "
-        "Somente arquivos com IP no nome serão considerados. MODELO/REFERÊNCIA será tratado como MODELO, e cada aba do Excel será tratada como família pelo número da aba."
-    )
+    with st.expander("ℹ️ Como funciona esta aba"):
+        st.markdown("""
+- Módulo para processos que ainda não têm certificado IP-BRI oficial emitido
+- Importa Excel de **inclusões, manutenções ou recertificações** — o tipo é detectado pelo nome do arquivo
+- **O arquivo precisa ter IP no nome** (ex: `INCLUSÃO 06-01-26 F01 IP-0094-26.xlsx`)
+- Cada aba do Excel é tratada como uma **família** pelo número presente no nome da aba
+- Os itens salvos aqui também são consultados pelo **Preenchimento de Confirmação**
+- Organizado por: categoria → cliente → fábrica → processo
+""")
 
     categoria_s5 = st.radio(
         "Categoria",
@@ -3699,3 +3895,4 @@ with aba6:
             "text/csv",
             key="download_sistema5_resumo"
         )
+
