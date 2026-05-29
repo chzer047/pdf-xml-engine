@@ -1829,6 +1829,48 @@ def codigo_barras_valido_s5(valor):
     return codigo
 
 
+
+def familia_desconsiderada_s5(nome_aba):
+    texto = clean(nome_aba).upper()
+    texto = texto.replace("Á", "A").replace("À", "A").replace("Â", "A").replace("Ã", "A")
+    texto = texto.replace("É", "E").replace("Ê", "E")
+    texto = texto.replace("Í", "I")
+    texto = texto.replace("Ó", "O").replace("Ô", "O").replace("Õ", "O")
+    texto = texto.replace("Ú", "U")
+    texto = texto.replace("Ç", "C")
+
+    return "DESCONSIDERADO" in texto or "DESCONSIDERADA" in texto
+
+
+
+def limpar_itens_desconsiderados_sistema5():
+    """
+    Remove itens antigos que já foram cadastrados no Sistema 5
+    em famílias/abas marcadas como DESCONSIDERADO ou DESCONSIDERADA.
+    """
+
+    try:
+        qtd_antes = cursor.execute("""
+        SELECT COUNT(*)
+        FROM sistema5_itens
+        WHERE UPPER(familia) LIKE '%DESCONSIDERADO%'
+        OR UPPER(familia) LIKE '%DESCONSIDERADA%'
+        """).fetchone()[0]
+
+        cursor.execute("""
+        DELETE FROM sistema5_itens
+        WHERE UPPER(familia) LIKE '%DESCONSIDERADO%'
+        OR UPPER(familia) LIKE '%DESCONSIDERADA%'
+        """)
+
+        conn.commit()
+
+        return qtd_antes
+
+    except Exception:
+        return 0
+
+
 def ler_excel_inclusao_sistema5(uploaded_file):
     """
     Leitor específico do Sistema 5.
@@ -1853,6 +1895,11 @@ def ler_excel_inclusao_sistema5(uploaded_file):
     todos_itens = []
 
     for aba in excel.sheet_names:
+        # Se a aba/família estiver marcada como DESCONSIDERADO,
+        # nenhum item desta família será cadastrado.
+        if familia_desconsiderada_s5(aba):
+            continue
+
         try:
             bruto = pd.read_excel(
                 uploaded_file,
@@ -2434,6 +2481,13 @@ def buscar_itens_processo_sistema5(arquivo_id, termo=""):
     WHERE arquivo_id = ?
     ORDER BY CAST(familia AS INTEGER), CAST(item AS INTEGER), modelo
     """, conn, params=(arquivo_id,))
+
+
+# Limpeza automática de itens antigos do Sistema 5 marcados como DESCONSIDERADO
+try:
+    limpar_itens_desconsiderados_sistema5()
+except Exception:
+    pass
 
 # ==========================================
 # TABS
@@ -3705,6 +3759,10 @@ with aba5:
 
 with aba6:
     st.title("Sistema 5")
+
+    if st.button("Limpar itens DESCONSIDERADOS já cadastrados", key="limpar_desconsiderados_s5"):
+        removidos_desconsiderados = limpar_itens_desconsiderados_sistema5()
+        st.success(f"{removidos_desconsiderados} item(ns) desconsiderado(s) removido(s) do Sistema 5 ✅")
 
     with st.expander("ℹ️ Como funciona esta aba"):
         st.markdown("""
