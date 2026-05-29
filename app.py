@@ -3148,6 +3148,63 @@ def cobertura_itens_por_familia(cliente_base, fabrica, ce_bri, familia):
         normalizar_familia(familia)
     ))
 
+
+def diagnosticar_referencia_confirmacao(ref):
+    ref = clean(ref)
+
+    if not ref:
+        return {
+            "status": "vazio",
+            "item_confirmacao": None,
+            "candidatos_sistema5": pd.DataFrame()
+        }
+
+    item = buscar_item_confirmacao(ref)
+
+    candidatos = pd.read_sql_query("""
+    SELECT
+        cliente_base,
+        categoria,
+        fabrica,
+        ce_bri,
+        endereco_fabrica,
+        tipo_processo,
+        ip_processo,
+        data_processo,
+        familia,
+        item,
+        marca,
+        modelo,
+        nome,
+        codigo,
+        arquivo_nome,
+        data_upload
+    FROM sistema5_itens
+    WHERE
+        UPPER(modelo) LIKE UPPER(?)
+        OR UPPER(modelo) LIKE UPPER(?)
+        OR UPPER(modelo) LIKE UPPER(?)
+    ORDER BY COALESCE(data_processo, '1900-01-01') DESC, id DESC
+    LIMIT 50
+    """, conn, params=(
+        f"{ref}%",
+        f"%{ref}%",
+        f"%{normalizar_hifens_ref(ref)}%"
+    ))
+
+    if item:
+        status = "encontrado_pela_confirmacao"
+    elif not candidatos.empty:
+        status = "existe_no_sistema5_mas_filtro_confirmacao_nao_aceitou"
+    else:
+        status = "nao_encontrado"
+
+    return {
+        "status": status,
+        "item_confirmacao": item,
+        "candidatos_sistema5": candidatos
+    }
+
 # ==========================================
 # TABS
 # ==========================================
@@ -4267,6 +4324,32 @@ with aba3:
 
 with aba4:
     st.title("Preenchimento de Confirmação")
+
+    with st.expander("🔎 Testar referência antes de preencher"):
+        ref_teste_confirmacao = st.text_input(
+            "Digite a referência para testar",
+            placeholder="Ex: BAL-17-FAN-PR",
+            key="teste_ref_confirmacao"
+        )
+
+        if st.button("Testar referência", key="btn_teste_ref_confirmacao"):
+            diag_ref = diagnosticar_referencia_confirmacao(ref_teste_confirmacao)
+
+            st.write(f"Status: **{diag_ref.get('status')}**")
+
+            if diag_ref.get("item_confirmacao"):
+                st.success("A confirmação encontrou este item ✅")
+                st.json(diag_ref.get("item_confirmacao"))
+            else:
+                st.warning("A confirmação não encontrou este item.")
+
+            candidatos_diag = diag_ref.get("candidatos_sistema5")
+
+            if candidatos_diag is not None and not candidatos_diag.empty:
+                st.info("Candidatos encontrados no Sistema 5:")
+                st.dataframe(candidatos_diag, use_container_width=True)
+            else:
+                st.error("Nenhum candidato encontrado no Sistema 5 pela busca bruta.")
 
     with st.expander("ℹ️ Como funciona esta aba"):
         st.markdown("""
