@@ -1827,6 +1827,31 @@ def normalizar_coluna_excel_s5(valor):
     return txt
 
 
+
+def valor_valido_item_s5(valor):
+    texto = clean(valor)
+
+    if not texto:
+        return False
+
+    if texto.lower() in ["nan", "none", "null", "-", "--"]:
+        return False
+
+    return True
+
+
+def codigo_barras_valido_s5(valor):
+    codigo = extrair_codigo_unico(valor)
+
+    if not codigo:
+        return None
+
+    if len(codigo) < 8 or len(codigo) > 14:
+        return None
+
+    return codigo
+
+
 def ler_excel_inclusao_sistema5(uploaded_file):
     """
     Leitor específico do Sistema 5.
@@ -1908,7 +1933,7 @@ def ler_excel_inclusao_sistema5(uploaded_file):
             codigo_raw = valor_coluna("CODIGO")
             nome = valor_coluna("NOME")
 
-            codigo = extrair_codigo_unico(codigo_raw) or re.sub(r"\D", "", codigo_raw)
+            codigo = codigo_barras_valido_s5(codigo_raw)
 
             linha_texto = " ".join([modelo, marca, codigo_raw, nome]).upper()
 
@@ -1929,8 +1954,28 @@ def ler_excel_inclusao_sistema5(uploaded_file):
             if any(p in linha_texto for p in palavras_ignorar):
                 continue
 
-            # Linha real precisa ter os 4 campos principais.
-            if not modelo or not marca or not codigo or not nome:
+            # Linha real precisa ter os 4 campos principais válidos.
+            if not valor_valido_item_s5(modelo):
+                continue
+
+            if not valor_valido_item_s5(marca):
+                continue
+
+            if not valor_valido_item_s5(nome):
+                continue
+
+            # Código precisa ser código de barras válido, com 8 a 14 dígitos.
+            if not codigo:
+                continue
+
+            # Evita linhas de complemento/rodapé que não são itens reais.
+            if marca.upper().strip() in ["DIRETA", "INDIRETA"]:
+                continue
+
+            if modelo.upper().strip() in ["DIRETA", "INDIRETA"]:
+                continue
+
+            if nome.upper().strip() in ["DIRETA", "INDIRETA"]:
                 continue
 
             # Evita cabeçalho repetido
