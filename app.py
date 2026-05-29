@@ -1711,6 +1711,25 @@ def salvar_ip_bri_familia(ce_bri, familia, ip_bri, observacao=""):
     if not ce_bri or not familia or not ip_bri:
         return False, "Informe CE-BRI, família e IP-BRI."
 
+    # Bloqueia o mesmo IP-BRI em outra família/CE-BRI.
+    duplicado = cursor.execute("""
+    SELECT ce_bri, familia
+    FROM ip_bri_familias
+    WHERE UPPER(ip_bri) = UPPER(?)
+    AND NOT (
+        UPPER(ce_bri) = UPPER(?)
+        AND familia = ?
+    )
+    LIMIT 1
+    """, (ip_bri, ce_bri, familia)).fetchone()
+
+    if duplicado:
+        return False, (
+            f"Este IP-BRI já está cadastrado em outro vínculo: "
+            f"{duplicado[0]} / família {duplicado[1]}. "
+            f"Edite ou exclua o cadastro antigo antes de salvar."
+        )
+
     existente = cursor.execute("""
     SELECT id
     FROM ip_bri_familias
@@ -1736,7 +1755,6 @@ def salvar_ip_bri_familia(ce_bri, familia, ip_bri, observacao=""):
 
     conn.commit()
     return True, f"IP-BRI {ip_bri} salvo para {ce_bri} / família {familia}."
-
 
 def buscar_ip_bri_manual_familia(ce_bri, familia):
     ce_bri = clean(ce_bri).upper()
@@ -1792,9 +1810,84 @@ def listar_ip_bri_pendentes_sistema5():
     ORDER BY s.cliente_base, s.fabrica, CAST(s.familia AS INTEGER), s.data_processo DESC
     """, conn)
 
+
+
+def atualizar_ip_bri_manual_por_id(registro_id, novo_ip_bri, nova_observacao=""):
+    registro_id = int(registro_id)
+    novo_ip_bri = normalizar_ip_bri_manual(novo_ip_bri)
+    nova_observacao = clean(nova_observacao)
+
+    atual = cursor.execute("""
+    SELECT ce_bri, familia
+    FROM ip_bri_familias
+    WHERE id = ?
+    """, (registro_id,)).fetchone()
+
+    if not atual:
+        return False, "Cadastro manual não encontrado."
+
+    ce_bri_atual, familia_atual = atual
+
+    duplicado = cursor.execute("""
+    SELECT ce_bri, familia
+    FROM ip_bri_familias
+    WHERE UPPER(ip_bri) = UPPER(?)
+    AND id != ?
+    LIMIT 1
+    """, (novo_ip_bri, registro_id)).fetchone()
+
+    if duplicado:
+        return False, (
+            f"Este IP-BRI já está cadastrado em {duplicado[0]} / família {duplicado[1]}. "
+            f"Não é permitido repetir o mesmo IP-BRI em famílias diferentes."
+        )
+
+    cursor.execute("""
+    UPDATE ip_bri_familias
+    SET ip_bri = ?, observacao = ?, data_atualizacao = ?
+    WHERE id = ?
+    """, (
+        novo_ip_bri,
+        nova_observacao,
+        datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
+        registro_id
+    ))
+
+    conn.commit()
+    return True, f"Cadastro atualizado: {ce_bri_atual} / família {familia_atual} → {novo_ip_bri}."
+
+
+def excluir_ip_bri_manual_por_id(registro_id):
+    registro_id = int(registro_id)
+
+    atual = cursor.execute("""
+    SELECT ce_bri, familia, ip_bri
+    FROM ip_bri_familias
+    WHERE id = ?
+    """, (registro_id,)).fetchone()
+
+    if not atual:
+        return False, "Cadastro manual não encontrado."
+
+    cursor.execute("""
+    DELETE FROM ip_bri_familias
+    WHERE id = ?
+    """, (registro_id,))
+
+    conn.commit()
+    return True, f"Cadastro excluído: {atual[0]} / família {atual[1]} / {atual[2]}."
+
+
 def listar_ip_bri_manuais():
     return pd.read_sql_query("""
-    SELECT ce_bri, familia, ip_bri, observacao, data_cadastro, data_atualizacao
+    SELECT
+        id,
+        ce_bri,
+        familia,
+        ip_bri,
+        observacao,
+        data_cadastro,
+        data_atualizacao
     FROM ip_bri_familias
     ORDER BY ce_bri, CAST(familia AS INTEGER)
     """, conn)
@@ -4898,6 +4991,92 @@ with aba7:
             "text/csv",
             key="download_ip_bri_manuais"
         )
+
+        st.divider()
+        st.subheader("Editar ou excluir IP-BRI manual")
+
+        opcoes_manuais = []
+
+        for _, linha in manuais.iterrows():
+            label = (
+                f"ID {linha.get('id', '')} | "
+                f"{linha.get('ce_bri', '')} | "
+                f"FAM {linha.get('familia', '')} | "
+                f"{linha.get('ip_bri', '')}"
+            )
+            opcoes_manuais.append(label)
+
+        escolha_manual = st.selectbox(
+            "Selecione o cadastro para editar/excluir",
+            opcoes_manuais,
+            key="select_editar_ip_bri_manual"
+        )
+
+        idx_manual = opcoes_manuais.index(escolha_manual)
+        linha_manual = manuais.iloc[idx_manual]
+
+        col_edit1, col_edit2, col_edit3 = st.columns(3)
+
+        with col_edit1:
+            st.text_input(
+                "CE-BRI vinculado",
+                value=clean(linha_manual.get("ce_bri", "")),
+                disabled=True,
+                key="edit_ip_ce_bri"
+            )
+
+        with col_edit2:
+            st.text_input(
+                "Família vinculada",
+                value=clean(linha_manual.get("familia", "")),
+                disabled=True,
+                key="edit_ip_familia"
+            )
+
+        with col_edit3:
+            novo_ip_editado = st.text_input(
+                "Novo IP-BRI",
+                value=clean(linha_manual.get("ip_bri", "")),
+                key="edit_ip_bri_novo"
+            )
+
+        nova_obs_editada = st.text_input(
+            "Observação",
+            value=clean(linha_manual.get("observacao", "")),
+            key="edit_ip_obs_nova"
+        )
+
+        col_btn1, col_btn2 = st.columns(2)
+
+        with col_btn1:
+            if st.button("Salvar alteração do IP-BRI", key="btn_salvar_edit_ip_manual"):
+                ok, mensagem = atualizar_ip_bri_manual_por_id(
+                    linha_manual.get("id"),
+                    novo_ip_editado,
+                    nova_obs_editada
+                )
+
+                if ok:
+                    st.success(mensagem)
+                else:
+                    st.error(mensagem)
+
+        with col_btn2:
+            confirmar_exclusao_ip = st.checkbox(
+                "Confirmo que quero excluir este cadastro",
+                key="confirmar_excluir_ip_manual"
+            )
+
+            if st.button("Excluir cadastro selecionado", key="btn_excluir_ip_manual"):
+                if not confirmar_exclusao_ip:
+                    st.warning("Marque a confirmação antes de excluir.")
+                else:
+                    ok, mensagem = excluir_ip_bri_manual_por_id(linha_manual.get("id"))
+
+                    if ok:
+                        st.success(mensagem)
+                    else:
+                        st.error(mensagem)
 
 
 
