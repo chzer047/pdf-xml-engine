@@ -2489,6 +2489,57 @@ try:
 except Exception:
     pass
 
+
+def pesquisar_global_sistema5(termo):
+    termo = clean(termo)
+
+    if not termo:
+        return pd.DataFrame()
+
+    return pd.read_sql_query("""
+    SELECT
+        cliente_base,
+        categoria,
+        fabrica,
+        ce_bri,
+        endereco_fabrica,
+        tipo_processo,
+        ip_processo,
+        data_processo,
+        familia,
+        item,
+        marca,
+        modelo,
+        nome,
+        codigo,
+        arquivo_nome,
+        data_upload
+    FROM sistema5_itens
+    WHERE
+        UPPER(modelo) LIKE UPPER(?)
+        OR codigo LIKE ?
+        OR UPPER(marca) LIKE UPPER(?)
+        OR UPPER(nome) LIKE UPPER(?)
+        OR UPPER(ip_processo) LIKE UPPER(?)
+        OR UPPER(ce_bri) LIKE UPPER(?)
+        OR UPPER(fabrica) LIKE UPPER(?)
+        OR UPPER(cliente_base) LIKE UPPER(?)
+        OR UPPER(arquivo_nome) LIKE UPPER(?)
+    ORDER BY
+        COALESCE(data_processo, '1900-01-01') DESC,
+        id DESC
+    """, conn, params=(
+        f"{termo}%",
+        f"%{termo}%",
+        f"%{termo}%",
+        f"%{termo}%",
+        f"%{termo}%",
+        f"%{termo}%",
+        f"%{termo}%",
+        f"%{termo}%",
+        f"%{termo}%"
+    ))
+
 # ==========================================
 # TABS
 # ==========================================
@@ -3763,6 +3814,39 @@ with aba6:
     if st.button("Limpar itens DESCONSIDERADOS já cadastrados", key="limpar_desconsiderados_s5"):
         removidos_desconsiderados = limpar_itens_desconsiderados_sistema5()
         st.success(f"{removidos_desconsiderados} item(ns) desconsiderado(s) removido(s) do Sistema 5 ✅")
+
+    st.divider()
+    st.subheader("🔎 Pesquisa Global Sistema 5")
+
+    termo_pesquisa_s5 = st.text_input(
+        "Pesquisar item no Sistema 5",
+        placeholder="Digite modelo, código, marca, descrição, IP, CE-BRI, fábrica ou cliente",
+        key="pesquisa_global_sistema5"
+    )
+
+    if st.button("Pesquisar no Sistema 5", key="botao_pesquisa_global_s5"):
+        if not clean(termo_pesquisa_s5):
+            st.warning("Digite algo para pesquisar.")
+        else:
+            resultado_global_s5 = pesquisar_global_sistema5(termo_pesquisa_s5)
+
+            if resultado_global_s5.empty:
+                st.warning("Nenhum item encontrado no Sistema 5.")
+            else:
+                st.success(f"{len(resultado_global_s5)} item(ns) encontrado(s) no Sistema 5 ✅")
+                st.dataframe(resultado_global_s5, use_container_width=True)
+
+                st.download_button(
+                    "Baixar resultado Sistema 5 CSV",
+                    resultado_global_s5.to_csv(index=False, sep=";").encode(
+                        "ISO-8859-1",
+                        errors="replace"
+                    ),
+                    "pesquisa_global_sistema5.csv",
+                    "text/csv",
+                    key="download_pesquisa_global_s5"
+                )
+
 
     with st.expander("ℹ️ Como funciona esta aba"):
         st.markdown("""
