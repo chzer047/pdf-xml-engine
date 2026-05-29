@@ -5015,35 +5015,29 @@ with aba7:
         idx_manual = opcoes_manuais.index(escolha_manual)
         linha_manual = manuais.iloc[idx_manual]
 
+        registro_manual_id = int(linha_manual.get("id"))
+
         col_edit1, col_edit2, col_edit3 = st.columns(3)
 
         with col_edit1:
-            st.text_input(
-                "CE-BRI vinculado",
-                value=clean(linha_manual.get("ce_bri", "")),
-                disabled=True,
-                key="edit_ip_ce_bri"
-            )
+            st.caption("CE-BRI vinculado")
+            st.code(clean(linha_manual.get("ce_bri", "")))
 
         with col_edit2:
-            st.text_input(
-                "Família vinculada",
-                value=clean(linha_manual.get("familia", "")),
-                disabled=True,
-                key="edit_ip_familia"
-            )
+            st.caption("Família vinculada")
+            st.code(clean(linha_manual.get("familia", "")))
 
         with col_edit3:
             novo_ip_editado = st.text_input(
                 "Novo IP-BRI",
                 value=clean(linha_manual.get("ip_bri", "")),
-                key="edit_ip_bri_novo"
+                key=f"edit_ip_bri_novo_{registro_manual_id}"
             )
 
         nova_obs_editada = st.text_input(
             "Observação",
             value=clean(linha_manual.get("observacao", "")),
-            key="edit_ip_obs_nova"
+            key=f"edit_ip_obs_nova_{registro_manual_id}"
         )
 
         col_btn1, col_btn2 = st.columns(2)
@@ -5051,7 +5045,7 @@ with aba7:
         with col_btn1:
             if st.button("Salvar alteração do IP-BRI", key="btn_salvar_edit_ip_manual"):
                 ok, mensagem = atualizar_ip_bri_manual_por_id(
-                    linha_manual.get("id"),
+                    registro_manual_id,
                     novo_ip_editado,
                     nova_obs_editada
                 )
@@ -5071,7 +5065,7 @@ with aba7:
                 if not confirmar_exclusao_ip:
                     st.warning("Marque a confirmação antes de excluir.")
                 else:
-                    ok, mensagem = excluir_ip_bri_manual_por_id(linha_manual.get("id"))
+                    ok, mensagem = excluir_ip_bri_manual_por_id(registro_manual_id)
 
                     if ok:
                         st.success(mensagem)
