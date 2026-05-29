@@ -1871,6 +1871,38 @@ def limpar_itens_desconsiderados_sistema5():
         return 0
 
 
+
+def parece_codigo_barras_s5(valor):
+    codigo = re.sub(r"\D", "", clean(valor))
+    return bool(codigo and len(codigo) >= 8 and len(codigo) <= 14)
+
+
+def parece_marca_s5(valor):
+    texto = clean(valor)
+    if not texto or texto.lower() in ["nan", "none", "null"]:
+        return False
+    # Marca normalmente tem letras; código de barras normalmente só números.
+    return bool(re.search(r"[A-Za-zÀ-ÿ]", texto))
+
+
+def corrigir_marca_codigo_invertidos_s5(marca, codigo_raw):
+    """
+    Alguns memoriais vêm com o cabeçalho:
+    Marca Comercializada | Código de Barras
+    mas os dados vêm invertidos:
+    código na coluna da marca e marca na coluna do código.
+
+    Se detectar isso, troca automaticamente.
+    """
+    marca_limpa = clean(marca)
+    codigo_limpo = clean(codigo_raw)
+
+    if parece_codigo_barras_s5(marca_limpa) and parece_marca_s5(codigo_limpo):
+        return codigo_limpo, marca_limpa
+
+    return marca_limpa, codigo_limpo
+
+
 def ler_excel_inclusao_sistema5(uploaded_file):
     """
     Leitor específico do Sistema 5.
@@ -1956,6 +1988,9 @@ def ler_excel_inclusao_sistema5(uploaded_file):
             marca = valor_coluna("MARCA")
             codigo_raw = valor_coluna("CODIGO")
             nome = valor_coluna("NOME")
+
+            # Corrige automaticamente quando o Excel vem com MARCA e CÓDIGO invertidos.
+            marca, codigo_raw = corrigir_marca_codigo_invertidos_s5(marca, codigo_raw)
 
             codigo = codigo_barras_valido_s5(codigo_raw)
 
