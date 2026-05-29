@@ -189,6 +189,93 @@ def clean(x):
 
 
 
+
+def normalizar_hifens_ref(valor):
+    """
+    Mantém o hífen como parte da referência, mas padroniza hífens unicode
+    que visualmente parecem iguais.
+    NÃO transforma SK-126 em SK126.
+    """
+    texto = clean(valor).upper()
+
+    for h in ["‐", "‑", "‒", "–", "—", "−", "﹣", "－"]:
+        texto = texto.replace(h, "-")
+
+    texto = texto.replace("\u200b", "")
+    texto = texto.replace("\u200c", "")
+    texto = texto.replace("\u200d", "")
+    texto = texto.replace("\ufeff", "")
+
+    texto = re.sub(r"\s+", " ", texto).strip()
+
+    return texto
+
+
+def extrair_referencia_inicial_modelo(modelo):
+    """
+    Extrai a referência inicial do modelo.
+
+    Ex:
+    SK-126 - BRINQUEDO SANFONA -> SK-126
+    SK-1261 - BRINQUEDO -> SK-1261
+    SK126 - BRINQUEDO -> SK126
+    """
+
+    texto = normalizar_hifens_ref(modelo)
+
+    partes = re.split(r"\s+-\s+", texto, maxsplit=1)
+
+    if partes:
+        return partes[0].strip()
+
+    return texto.strip()
+
+
+def modelo_corresponde_referencia_exata(modelo_banco, ref_busca):
+    """
+    Regra rígida da confirmação:
+
+    SK-126 encontra:
+    - SK-126
+    - SK-126 - descrição
+
+    SK-126 NÃO encontra:
+    - SK126
+    - SK-1261
+    - SK-126A
+    - SK-126 B
+    """
+
+    ref_buscada = normalizar_hifens_ref(ref_busca)
+    ref_modelo = extrair_referencia_inicial_modelo(modelo_banco)
+
+    if not ref_buscada or not ref_modelo:
+        return False
+
+    return ref_modelo == ref_buscada
+
+
+def filtrar_resultado_por_referencia_exata(df, ref_busca):
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    col_modelo = None
+
+    if "MODELO" in df.columns:
+        col_modelo = "MODELO"
+    elif "modelo" in df.columns:
+        col_modelo = "modelo"
+
+    if not col_modelo:
+        return pd.DataFrame()
+
+    return df[
+        df[col_modelo].apply(
+            lambda modelo: modelo_corresponde_referencia_exata(modelo, ref_busca)
+        )
+    ].copy()
+
+
 def corrigir_texto(texto):
     if texto is None:
         return ""
@@ -1433,6 +1520,7 @@ def buscar_item_confirmacao(valor_ref):
     if item_s5:
         return item_s5
 
+    # Busca candidatos no certificado oficial, mas só aceita se a referência inicial for exatamente igual.
     resultado = pd.read_sql_query("""
     SELECT
         i.marca AS MARCA,
@@ -1453,8 +1541,10 @@ def buscar_item_confirmacao(valor_ref):
        OR UPPER(TRIM(i.modelo)) LIKE UPPER(TRIM(?) || ' -%')
        OR UPPER(TRIM(i.modelo)) LIKE UPPER(TRIM(?) || '%')
     ORDER BY c.rev DESC, c.ip_bri DESC
-    LIMIT 1
+    LIMIT 100
     """, conn, params=(ref, ref, ref))
+
+    resultado = filtrar_resultado_por_referencia_exata(resultado, ref)
 
     if resultado.empty:
         return None
@@ -2196,6 +2286,7 @@ def buscar_item_sistema5_confirmacao(valor_ref):
     if not ref:
         return None
 
+    # Busca candidatos, mas só aceita se a referência inicial for exatamente igual.
     resultado = pd.read_sql_query("""
     SELECT
         marca AS MARCA,
@@ -2216,8 +2307,10 @@ def buscar_item_sistema5_confirmacao(valor_ref):
        OR UPPER(TRIM(modelo)) LIKE UPPER(TRIM(?) || ' -%')
        OR UPPER(TRIM(modelo)) LIKE UPPER(TRIM(?) || '%')
     ORDER BY COALESCE(data_processo, '1900-01-01') DESC, id DESC
-    LIMIT 1
+    LIMIT 100
     """, conn, params=(ref, ref, ref))
+
+    resultado = filtrar_resultado_por_referencia_exata(resultado, ref)
 
     if resultado.empty:
         return None
@@ -2227,10 +2320,9 @@ def buscar_item_sistema5_confirmacao(valor_ref):
     ce_bri = clean(item.get("CE_BRI"))
     familia = clean(item.get("FAMILIA"))
 
-    # REGRA:
-    # Se o item veio do Sistema 5, o IP do processo fica separado em IP_PROCESSO.
-    # O campo IP_BRI deve tentar puxar o IP-BRI oficial pelo CE-BRI + família.
-    # Se ainda não existir certificado oficial emitido, usa a família encontrada.
+    # IP do processo fica separado em IP_PROCESSO.
+    # IP_BRI tenta puxar o IP-BRI oficial pelo CE-BRI + família.
+    # Se não existir certificado oficial ainda, usa a família encontrada.
     ip_bri_oficial = None
 
     if ce_bri and familia:
