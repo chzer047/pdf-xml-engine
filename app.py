@@ -1488,8 +1488,16 @@ def eh_amarelo(cell):
         return False
 
     r, g, b = rgb
-    return r >= 180 and g >= 150 and b <= 140
 
+    # Amarelo comum/forte: FFEB00, FFFF00, FFE699, etc.
+    if r >= 170 and g >= 140 and b <= 170:
+        return True
+
+    # Amarelo claro de templates
+    if r >= 220 and g >= 200 and b <= 190:
+        return True
+
+    return False
 
 
 def eh_verde(cell):
@@ -1498,8 +1506,16 @@ def eh_verde(cell):
         return False
 
     r, g, b = rgb
-    return g >= 120 and r <= 180 and b <= 180 and g >= r
 
+    # Verde forte/claro: 92D050, 70AD47, A9D18E, etc.
+    if g >= 110 and g >= r and g >= b and r <= 210:
+        return True
+
+    # Verde bem claro usado em alguns templates
+    if g >= 170 and r <= 220 and b <= 220 and g > r - 10:
+        return True
+
+    return False
 
 
 def eh_azul(cell):
@@ -1607,6 +1623,14 @@ def preencher_excel_confirmacao(uploaded_file):
     preenchidos = 0
     nao_encontrados = []
 
+    diagnostico = {
+        "referencias_verdes_lidas": 0,
+        "linhas_com_referencia": 0,
+        "itens_encontrados": 0,
+        "celulas_amarelas_detectadas": 0,
+        "campos_reconhecidos": 0
+    }
+
     campos_validos = ["MARCA", "MODELO", "NOME", "CODIGO", "IP_BRI", "CE_BRI", "REGISTRO", "ENDERECO", "FAMILIA", "ITEM", "TIPO_PROCESSO", "DATA_PROCESSO", "ARQUIVO_ORIGEM", "IP_PROCESSO"]
 
     for ws in wb.worksheets:
@@ -1615,8 +1639,6 @@ def preencher_excel_confirmacao(uploaded_file):
 
             # REGRA OFICIAL:
             # Qualquer célula verde da linha é considerada referência.
-            # Não importa o nome da coluna.
-            # Não precisa existir coluna chamada REF.
             for cell in row:
                 if eh_verde(cell) and clean(cell.value):
                     refs.append(clean(cell.value))
@@ -1624,9 +1646,11 @@ def preencher_excel_confirmacao(uploaded_file):
             if not refs:
                 continue
 
+            diagnostico["linhas_com_referencia"] += 1
+            diagnostico["referencias_verdes_lidas"] += len(refs)
+
             item = None
 
-            # Se houver mais de uma célula verde na linha, tenta na ordem em que aparece.
             for ref in refs:
                 item = buscar_item_confirmacao(ref)
                 if item:
@@ -1636,14 +1660,20 @@ def preencher_excel_confirmacao(uploaded_file):
                 nao_encontrados.extend(refs)
                 continue
 
+            diagnostico["itens_encontrados"] += 1
+
             for cell in row:
                 if not eh_amarelo(cell):
                     continue
+
+                diagnostico["celulas_amarelas_detectadas"] += 1
 
                 campo = descobrir_cabecalho_coluna(ws, cell.row, cell.column)
 
                 if campo not in campos_validos:
                     continue
+
+                diagnostico["campos_reconhecidos"] += 1
 
                 valor = item.get(campo)
 
@@ -1662,8 +1692,9 @@ def preencher_excel_confirmacao(uploaded_file):
     wb.save(output)
     output.seek(0)
 
-    return output, preenchidos, nao_encontrados
+    st.session_state["diagnostico_confirmacao"] = diagnostico
 
+    return output, preenchidos, nao_encontrados
 
 def atualizar_endereco_fabrica_existente(cliente_base, fabrica, novo_endereco):
     cliente_base = clean(cliente_base).upper()
