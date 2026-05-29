@@ -207,8 +207,8 @@ def clean(x):
 
 def normalizar_hifens_ref(valor):
     """
-    Padroniza hífens unicode e espaços invisíveis, mas NÃO remove hífens.
-    Isso mantém SK-126 diferente de SK126.
+    Padroniza hífens unicode, remove espaços invisíveis e normaliza espaços.
+    NÃO remove hífens comuns. SK-126 continua diferente de SK126.
     """
     texto = clean(valor).upper()
 
@@ -219,31 +219,20 @@ def normalizar_hifens_ref(valor):
     texto = texto.replace("\u200c", "")
     texto = texto.replace("\u200d", "")
     texto = texto.replace("\ufeff", "")
+    texto = texto.replace("\xa0", " ")
 
     texto = re.sub(r"\s+", " ", texto).strip()
 
     return texto
 
 
-def extrair_referencia_inicial_modelo(modelo):
-    """
-    Mantida por compatibilidade, mas a comparação principal agora usa boundary.
-    """
-    texto = normalizar_hifens_ref(modelo)
-    partes = re.split(r"\s+-\s+", texto, maxsplit=1)
-    if partes:
-        return partes[0].strip()
-    return texto.strip()
-
-
 def modelo_corresponde_referencia_exata(modelo_banco, ref_busca):
     """
-    Regra segura para confirmação:
+    Regra segura:
 
     Aceita:
     BAL-17-FAN-PR == BAL-17-FAN-PR
     BAL-17-FAN-PR == BAL-17-FAN-PR - DESCRIÇÃO
-    BAL-17-FAN-PR == BAL-17-FAN-PR–DESCRIÇÃO
 
     Rejeita:
     SK-126 != SK-1261
@@ -268,8 +257,8 @@ def modelo_corresponde_referencia_exata(modelo_banco, ref_busca):
     if not resto:
         return True
 
-    # Aceita somente se depois da referência vier um separador real de descrição.
-    # Ex: " - descrição", "- descrição"; hífens unicode já foram normalizados.
+    # Aceita apenas quando depois da referência existe separador de descrição.
+    # Ex: " - BRINQUEDO" ou "- BRINQUEDO".
     if re.match(r"^\s*-\s+.+", resto):
         return True
 
@@ -1563,8 +1552,7 @@ def buscar_item_confirmacao(valor_ref):
     if item_s5:
         return item_s5
 
-    # Busca candidatos no certificado oficial, mas só aceita se a referência inicial for exatamente igual.
-    resultado = pd.read_sql_query("""
+    candidatos = pd.read_sql_query("""
     SELECT
         i.marca AS MARCA,
         i.modelo AS MODELO,
@@ -1580,15 +1568,10 @@ def buscar_item_confirmacao(valor_ref):
     LEFT JOIN registros r
     ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
     AND r.familia = c.familia
-    WHERE UPPER(TRIM(i.modelo)) = UPPER(TRIM(?))
-       OR UPPER(TRIM(i.modelo)) LIKE UPPER(TRIM(?) || ' -%')
-       OR UPPER(TRIM(i.modelo)) LIKE UPPER(TRIM(?) || '- %')
-       OR UPPER(TRIM(i.modelo)) LIKE UPPER(TRIM(?) || '%')
     ORDER BY c.rev DESC, c.ip_bri DESC
-    LIMIT 100
-    """, conn, params=(ref, ref, ref, ref))
+    """, conn)
 
-    resultado = filtrar_resultado_por_referencia_exata(resultado, ref)
+    resultado = filtrar_resultado_por_referencia_exata(candidatos, ref)
 
     if resultado.empty:
         return None
@@ -2499,8 +2482,9 @@ def buscar_item_sistema5_confirmacao(valor_ref):
     if not ref:
         return None
 
-    # Busca candidatos, mas só aceita se a referência inicial for exatamente igual.
-    resultado = pd.read_sql_query("""
+    # Busca ampla no Sistema 5 e filtra em Python pela referência exata.
+    # Isso evita falha por hífen unicode, espaço invisível ou formatação diferente.
+    candidatos = pd.read_sql_query("""
     SELECT
         marca AS MARCA,
         modelo AS MODELO,
@@ -2514,17 +2498,13 @@ def buscar_item_sistema5_confirmacao(valor_ref):
         tipo_processo AS TIPO_PROCESSO,
         data_processo AS DATA_PROCESSO,
         familia AS FAMILIA,
-        arquivo_nome AS ARQUIVO_ORIGEM
+        arquivo_nome AS ARQUIVO_ORIGEM,
+        id AS ID_SISTEMA5
     FROM sistema5_itens
-    WHERE UPPER(TRIM(modelo)) = UPPER(TRIM(?))
-       OR UPPER(TRIM(modelo)) LIKE UPPER(TRIM(?) || ' -%')
-       OR UPPER(TRIM(modelo)) LIKE UPPER(TRIM(?) || '- %')
-       OR UPPER(TRIM(modelo)) LIKE UPPER(TRIM(?) || '%')
     ORDER BY COALESCE(data_processo, '1900-01-01') DESC, id DESC
-    LIMIT 100
-    """, conn, params=(ref, ref, ref, ref))
+    """, conn)
 
-    resultado = filtrar_resultado_por_referencia_exata(resultado, ref)
+    resultado = filtrar_resultado_por_referencia_exata(candidatos, ref)
 
     if resultado.empty:
         return None
@@ -2534,9 +2514,6 @@ def buscar_item_sistema5_confirmacao(valor_ref):
     ce_bri = clean(item.get("CE_BRI"))
     familia = clean(item.get("FAMILIA"))
 
-    # IP do processo fica separado em IP_PROCESSO.
-    # IP_BRI tenta puxar o IP-BRI oficial pelo CE-BRI + família.
-    # Se não existir certificado oficial ainda, usa a família encontrada.
     ip_bri_oficial = None
 
     if ce_bri and familia:
@@ -2555,7 +2532,7 @@ def buscar_item_sistema5_confirmacao(valor_ref):
     if ip_bri_oficial:
         item["IP_BRI"] = ip_bri_oficial
     else:
-        ip_bri_manual = buscar_ip_bri_manual_familia(ce_bri, familia)
+        ip_bri_manual = buscar_ip_bri_manual_familia(ce_bri, familia) if "buscar_ip_bri_manual_familia" in globals() else ""
         if ip_bri_manual:
             item["IP_BRI"] = ip_bri_manual
         else:
