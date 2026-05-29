@@ -1768,6 +1768,7 @@ def listar_ip_bri_pendentes_sistema5():
         s.fabrica,
         s.ce_bri,
         s.familia,
+        r.registro AS registro,
         s.tipo_processo,
         s.ip_processo,
         s.data_processo,
@@ -1779,6 +1780,9 @@ def listar_ip_bri_pendentes_sistema5():
     LEFT JOIN ip_bri_familias m
     ON UPPER(m.ce_bri) = UPPER(s.ce_bri)
     AND m.familia = s.familia
+    LEFT JOIN registros r
+    ON UPPER(r.ce_bri) = UPPER(s.ce_bri)
+    AND r.familia = s.familia
     WHERE s.ce_bri IS NOT NULL
     AND s.ce_bri != ''
     AND s.familia IS NOT NULL
@@ -1787,7 +1791,6 @@ def listar_ip_bri_pendentes_sistema5():
     AND m.ip_bri IS NULL
     ORDER BY s.cliente_base, s.fabrica, CAST(s.familia AS INTEGER), s.data_processo DESC
     """, conn)
-
 
 def listar_ip_bri_manuais():
     return pd.read_sql_query("""
@@ -2808,6 +2811,292 @@ def pesquisar_global_sistema5(termo):
         f"%{termo}%"
     ))
 
+
+
+# ==========================================
+# PAINEL DE COBERTURA
+# ==========================================
+
+def cobertura_resumo_geral():
+    dados = {}
+
+    try:
+        dados["clientes_registros"] = cursor.execute("""
+        SELECT COUNT(DISTINCT cliente_base)
+        FROM registros
+        WHERE cliente_base IS NOT NULL AND cliente_base != ''
+        """).fetchone()[0]
+    except Exception:
+        dados["clientes_registros"] = 0
+
+    try:
+        dados["fabricas_registros"] = cursor.execute("""
+        SELECT COUNT(DISTINCT cliente_base || '|' || fabrica)
+        FROM registros
+        WHERE fabrica IS NOT NULL AND fabrica != ''
+        """).fetchone()[0]
+    except Exception:
+        dados["fabricas_registros"] = 0
+
+    try:
+        dados["familias_registros"] = cursor.execute("""
+        SELECT COUNT(DISTINCT ce_bri || '|' || familia)
+        FROM registros
+        WHERE ce_bri IS NOT NULL AND ce_bri != ''
+        AND familia IS NOT NULL AND familia != ''
+        """).fetchone()[0]
+    except Exception:
+        dados["familias_registros"] = 0
+
+    try:
+        dados["familias_sistema5"] = cursor.execute("""
+        SELECT COUNT(DISTINCT ce_bri || '|' || familia)
+        FROM sistema5_itens
+        WHERE ce_bri IS NOT NULL AND ce_bri != ''
+        AND familia IS NOT NULL AND familia != ''
+        """).fetchone()[0]
+    except Exception:
+        dados["familias_sistema5"] = 0
+
+    try:
+        dados["itens_sistema5"] = cursor.execute("""
+        SELECT COUNT(*)
+        FROM sistema5_itens
+        """).fetchone()[0]
+    except Exception:
+        dados["itens_sistema5"] = 0
+
+    try:
+        dados["pendentes_ip_bri"] = len(listar_ip_bri_pendentes_sistema5())
+    except Exception:
+        dados["pendentes_ip_bri"] = 0
+
+    return dados
+
+
+def cobertura_fabricas():
+    return pd.read_sql_query("""
+    WITH chaves AS (
+        SELECT DISTINCT cliente_base, fabrica, ce_bri
+        FROM registros
+        WHERE fabrica IS NOT NULL AND fabrica != ''
+
+        UNION
+
+        SELECT DISTINCT cliente_base, fabrica, ce_bri
+        FROM sistema5_itens
+        WHERE fabrica IS NOT NULL AND fabrica != ''
+    ),
+    familias_reg AS (
+        SELECT
+            cliente_base,
+            fabrica,
+            ce_bri,
+            COUNT(DISTINCT familia) AS familias_registros
+        FROM registros
+        WHERE fabrica IS NOT NULL AND fabrica != ''
+        GROUP BY cliente_base, fabrica, ce_bri
+    ),
+    familias_s5 AS (
+        SELECT
+            cliente_base,
+            fabrica,
+            ce_bri,
+            COUNT(DISTINCT familia) AS familias_sistema5,
+            COUNT(*) AS itens_sistema5
+        FROM sistema5_itens
+        WHERE fabrica IS NOT NULL AND fabrica != ''
+        GROUP BY cliente_base, fabrica, ce_bri
+    ),
+    pendentes AS (
+        SELECT
+            s.cliente_base,
+            s.fabrica,
+            s.ce_bri,
+            COUNT(DISTINCT s.familia) AS familias_pendentes_ip_bri
+        FROM sistema5_itens s
+        LEFT JOIN certificados c
+        ON UPPER(c.ce_bri) = UPPER(s.ce_bri)
+        AND c.familia = s.familia
+        LEFT JOIN ip_bri_familias m
+        ON UPPER(m.ce_bri) = UPPER(s.ce_bri)
+        AND m.familia = s.familia
+        WHERE s.ce_bri IS NOT NULL
+        AND s.ce_bri != ''
+        AND s.familia IS NOT NULL
+        AND s.familia != ''
+        AND c.ip_bri IS NULL
+        AND m.ip_bri IS NULL
+        GROUP BY s.cliente_base, s.fabrica, s.ce_bri
+    )
+    SELECT
+        chaves.cliente_base,
+        chaves.fabrica,
+        chaves.ce_bri,
+        COALESCE(r.familias_registros, 0) AS familias_registros,
+        COALESCE(s.familias_sistema5, 0) AS familias_sistema5,
+        COALESCE(s.itens_sistema5, 0) AS itens_sistema5,
+        COALESCE(p.familias_pendentes_ip_bri, 0) AS familias_pendentes_ip_bri
+    FROM chaves
+    LEFT JOIN familias_reg r
+    ON UPPER(r.cliente_base) = UPPER(chaves.cliente_base)
+    AND UPPER(r.fabrica) = UPPER(chaves.fabrica)
+    AND UPPER(r.ce_bri) = UPPER(chaves.ce_bri)
+    LEFT JOIN familias_s5 s
+    ON UPPER(s.cliente_base) = UPPER(chaves.cliente_base)
+    AND UPPER(s.fabrica) = UPPER(chaves.fabrica)
+    AND UPPER(s.ce_bri) = UPPER(chaves.ce_bri)
+    LEFT JOIN pendentes p
+    ON UPPER(p.cliente_base) = UPPER(chaves.cliente_base)
+    AND UPPER(p.fabrica) = UPPER(chaves.fabrica)
+    AND UPPER(p.ce_bri) = UPPER(chaves.ce_bri)
+    ORDER BY chaves.cliente_base, chaves.fabrica
+    """, conn)
+
+def cobertura_familias_detalhada(cliente_base="", fabrica="", ce_bri=""):
+    where = []
+    params = []
+
+    if clean(cliente_base):
+        where.append("UPPER(base.cliente_base) = UPPER(?)")
+        params.append(clean(cliente_base))
+
+    if clean(fabrica):
+        where.append("UPPER(base.fabrica) = UPPER(?)")
+        params.append(clean(fabrica))
+
+    if clean(ce_bri):
+        where.append("UPPER(base.ce_bri) = UPPER(?)")
+        params.append(clean(ce_bri))
+
+    filtro = ""
+    if where:
+        filtro = "WHERE " + " AND ".join(where)
+
+    sql = f"""
+    WITH base AS (
+        SELECT
+            cliente_base,
+            fabrica,
+            ce_bri,
+            familia
+        FROM registros
+        WHERE familia IS NOT NULL AND familia != ''
+
+        UNION
+
+        SELECT
+            cliente_base,
+            fabrica,
+            ce_bri,
+            familia
+        FROM sistema5_itens
+        WHERE familia IS NOT NULL AND familia != ''
+    ),
+    itens_s5 AS (
+        SELECT
+            cliente_base,
+            fabrica,
+            ce_bri,
+            familia,
+            COUNT(*) AS qtd_itens_sistema5,
+            GROUP_CONCAT(DISTINCT ip_processo) AS ips_processos
+        FROM sistema5_itens
+        GROUP BY cliente_base, fabrica, ce_bri, familia
+    ),
+    regs AS (
+        SELECT
+            cliente_base,
+            fabrica,
+            ce_bri,
+            familia,
+            MAX(registro) AS registro
+        FROM registros
+        GROUP BY cliente_base, fabrica, ce_bri, familia
+    ),
+    certs AS (
+        SELECT
+            ce_bri,
+            familia,
+            MAX(ip_bri) AS ip_bri_oficial,
+            MAX(rev) AS rev
+        FROM certificados
+        GROUP BY ce_bri, familia
+    ),
+    manuais AS (
+        SELECT
+            ce_bri,
+            familia,
+            MAX(ip_bri) AS ip_bri_manual
+        FROM ip_bri_familias
+        GROUP BY ce_bri, familia
+    )
+    SELECT
+        base.cliente_base,
+        base.fabrica,
+        base.ce_bri,
+        base.familia,
+        COALESCE(itens_s5.qtd_itens_sistema5, 0) AS qtd_itens_sistema5,
+        COALESCE(regs.registro, '') AS registro,
+        COALESCE(certs.ip_bri_oficial, '') AS ip_bri_oficial,
+        COALESCE(manuais.ip_bri_manual, '') AS ip_bri_manual,
+        CASE
+            WHEN certs.ip_bri_oficial IS NOT NULL AND certs.ip_bri_oficial != '' THEN 'OFICIAL'
+            WHEN manuais.ip_bri_manual IS NOT NULL AND manuais.ip_bri_manual != '' THEN 'MANUAL'
+            ELSE 'PENDENTE'
+        END AS status_ip_bri,
+        COALESCE(certs.rev, '') AS rev,
+        COALESCE(itens_s5.ips_processos, '') AS ips_processos
+    FROM base
+    LEFT JOIN itens_s5
+    ON UPPER(itens_s5.cliente_base) = UPPER(base.cliente_base)
+    AND UPPER(itens_s5.fabrica) = UPPER(base.fabrica)
+    AND UPPER(itens_s5.ce_bri) = UPPER(base.ce_bri)
+    AND itens_s5.familia = base.familia
+    LEFT JOIN regs
+    ON UPPER(regs.cliente_base) = UPPER(base.cliente_base)
+    AND UPPER(regs.fabrica) = UPPER(base.fabrica)
+    AND UPPER(regs.ce_bri) = UPPER(base.ce_bri)
+    AND regs.familia = base.familia
+    LEFT JOIN certs
+    ON UPPER(certs.ce_bri) = UPPER(base.ce_bri)
+    AND certs.familia = base.familia
+    LEFT JOIN manuais
+    ON UPPER(manuais.ce_bri) = UPPER(base.ce_bri)
+    AND manuais.familia = base.familia
+    {filtro}
+    ORDER BY base.cliente_base, base.fabrica, CAST(base.familia AS INTEGER)
+    """
+
+    return pd.read_sql_query(sql, conn, params=tuple(params))
+
+
+def cobertura_itens_por_familia(cliente_base, fabrica, ce_bri, familia):
+    return pd.read_sql_query("""
+    SELECT
+        familia,
+        item,
+        marca,
+        modelo,
+        nome,
+        codigo,
+        tipo_processo,
+        ip_processo,
+        data_processo,
+        arquivo_nome
+    FROM sistema5_itens
+    WHERE UPPER(cliente_base) = UPPER(?)
+    AND UPPER(fabrica) = UPPER(?)
+    AND UPPER(ce_bri) = UPPER(?)
+    AND familia = ?
+    ORDER BY CAST(item AS INTEGER), modelo
+    """, conn, params=(
+        clean(cliente_base),
+        clean(fabrica),
+        clean(ce_bri),
+        normalizar_familia(familia)
+    ))
+
 # ==========================================
 # TABS
 # ==========================================
@@ -2852,7 +3141,7 @@ try:
 except Exception as e:
     st.sidebar.warning(f"Backup geral indisponível: {e}")
 
-aba0, aba1, aba2, aba3, aba4, aba5, aba6, aba7 = st.tabs([
+aba0, aba1, aba2, aba3, aba4, aba5, aba6, aba7, aba8 = st.tabs([
     "🏠 Início",
     "PDF → XML",
     "Banco de Certificados",
@@ -2860,7 +3149,8 @@ aba0, aba1, aba2, aba3, aba4, aba5, aba6, aba7 = st.tabs([
     "Preenchimento de Confirmação",
     "Pesquisa Avançada",
     "Sistema 5",
-    "IP-BRI Pendentes"
+    "IP-BRI Pendentes",
+    "Painel de Cobertura"
 ])
 
 # ==========================================
@@ -4525,6 +4815,7 @@ with aba7:
                 f"{linha.get('fabrica', '')} | "
                 f"{linha.get('ce_bri', '')} | "
                 f"FAM {linha.get('familia', '')} | "
+                f"REG {linha.get('registro', '')} | "
                 f"{linha.get('ip_processo', '')}"
             )
             opcoes_pendentes.append(label)
@@ -4543,6 +4834,7 @@ with aba7:
         with col_ip1:
             st.text_input("CE-BRI", value=clean(linha_escolhida.get("ce_bri", "")), disabled=True, key="ip_pendente_ce_bri")
             st.text_input("Família", value=clean(linha_escolhida.get("familia", "")), disabled=True, key="ip_pendente_familia")
+            st.text_input("Registro", value=clean(linha_escolhida.get("registro", "")), disabled=True, key="ip_pendente_registro")
 
         with col_ip2:
             novo_ip_bri_manual = st.text_input("IP-BRI a cadastrar", placeholder="Ex: IP-BRI-1550-26 ou 1550-26", key="novo_ip_bri_manual")
@@ -4602,4 +4894,134 @@ with aba7:
             "text/csv",
             key="download_ip_bri_manuais"
         )
+
+
+
+# ==========================================
+# ABA 8 - PAINEL DE COBERTURA
+# ==========================================
+
+with aba8:
+    st.title("Painel de Cobertura")
+
+    st.info(
+        "Visão geral por cliente, fábrica, CE-BRI, família e quantidade de itens. "
+        "Use para saber quantas fábricas existem, quantas famílias cada fábrica possui "
+        "e quantos itens existem em cada família."
+    )
+
+    resumo = cobertura_resumo_geral()
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Clientes", resumo.get("clientes_registros", 0))
+    c2.metric("Fábricas", resumo.get("fabricas_registros", 0))
+    c3.metric("Famílias Registros", resumo.get("familias_registros", 0))
+    c4.metric("Famílias Sistema 5", resumo.get("familias_sistema5", 0))
+    c5.metric("Pendentes IP-BRI", resumo.get("pendentes_ip_bri", 0))
+
+    st.divider()
+
+    st.subheader("Resumo por fábrica")
+
+    df_fabricas = cobertura_fabricas()
+
+    if df_fabricas.empty:
+        st.info("Nenhuma fábrica encontrada.")
+    else:
+        st.dataframe(df_fabricas, use_container_width=True)
+
+        st.download_button(
+            "Baixar resumo por fábrica CSV",
+            df_fabricas.to_csv(index=False, sep=";").encode("ISO-8859-1", errors="replace"),
+            "painel_cobertura_fabricas.csv",
+            "text/csv",
+            key="download_cobertura_fabricas"
+        )
+
+    st.divider()
+
+    st.subheader("Detalhamento por família")
+
+    if df_fabricas.empty:
+        st.info("Cadastre registros ou processos no Sistema 5 para visualizar o detalhamento.")
+    else:
+        clientes_opcoes = ["TODOS"] + sorted(df_fabricas["cliente_base"].dropna().astype(str).unique().tolist())
+        cliente_filtro = st.selectbox("Cliente", clientes_opcoes, key="cobertura_cliente")
+
+        df_base_filtro = df_fabricas.copy()
+        if cliente_filtro != "TODOS":
+            df_base_filtro = df_base_filtro[df_base_filtro["cliente_base"].astype(str) == cliente_filtro]
+
+        fabricas_opcoes = ["TODAS"] + sorted(df_base_filtro["fabrica"].dropna().astype(str).unique().tolist())
+        fabrica_filtro = st.selectbox("Fábrica", fabricas_opcoes, key="cobertura_fabrica")
+
+        ce_opcoes_base = df_base_filtro.copy()
+        if fabrica_filtro != "TODAS":
+            ce_opcoes_base = ce_opcoes_base[ce_opcoes_base["fabrica"].astype(str) == fabrica_filtro]
+
+        ce_opcoes = ["TODOS"] + sorted(ce_opcoes_base["ce_bri"].dropna().astype(str).unique().tolist())
+        ce_filtro = st.selectbox("CE-BRI", ce_opcoes, key="cobertura_ce_bri")
+
+        df_familias = cobertura_familias_detalhada(
+            "" if cliente_filtro == "TODOS" else cliente_filtro,
+            "" if fabrica_filtro == "TODAS" else fabrica_filtro,
+            "" if ce_filtro == "TODOS" else ce_filtro
+        )
+
+        if df_familias.empty:
+            st.warning("Nenhuma família encontrada para os filtros selecionados.")
+        else:
+            st.dataframe(df_familias, use_container_width=True)
+
+            st.download_button(
+                "Baixar detalhamento por família CSV",
+                df_familias.to_csv(index=False, sep=";").encode("ISO-8859-1", errors="replace"),
+                "painel_cobertura_familias.csv",
+                "text/csv",
+                key="download_cobertura_familias"
+            )
+
+            st.divider()
+            st.subheader("Itens de uma família específica")
+
+            opcoes_familia = []
+            for _, linha in df_familias.iterrows():
+                label = (
+                    f"{linha.get('cliente_base', '')} | "
+                    f"{linha.get('fabrica', '')} | "
+                    f"{linha.get('ce_bri', '')} | "
+                    f"FAM {linha.get('familia', '')} | "
+                    f"{linha.get('qtd_itens_sistema5', 0)} itens"
+                )
+                opcoes_familia.append(label)
+
+            escolha_fam = st.selectbox(
+                "Selecione uma família para ver os itens",
+                opcoes_familia,
+                key="select_cobertura_familia_itens"
+            )
+
+            idx_fam = opcoes_familia.index(escolha_fam)
+            linha_fam = df_familias.iloc[idx_fam]
+
+            df_itens_fam = cobertura_itens_por_familia(
+                linha_fam.get("cliente_base", ""),
+                linha_fam.get("fabrica", ""),
+                linha_fam.get("ce_bri", ""),
+                linha_fam.get("familia", "")
+            )
+
+            if df_itens_fam.empty:
+                st.info("Essa família não possui itens no Sistema 5.")
+            else:
+                st.success(f"{len(df_itens_fam)} item(ns) encontrado(s) nesta família.")
+                st.dataframe(df_itens_fam, use_container_width=True)
+
+                st.download_button(
+                    "Baixar itens da família CSV",
+                    df_itens_fam.to_csv(index=False, sep=";").encode("ISO-8859-1", errors="replace"),
+                    "painel_cobertura_itens_familia.csv",
+                    "text/csv",
+                    key="download_cobertura_itens_familia"
+                )
 
