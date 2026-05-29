@@ -161,6 +161,20 @@ CREATE TABLE IF NOT EXISTS sistema5_itens (
 )
 """)
 
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS ip_bri_familias (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ce_bri TEXT,
+    familia TEXT,
+    ip_bri TEXT,
+    observacao TEXT,
+    data_cadastro TEXT,
+    data_atualizacao TEXT,
+    UNIQUE(ce_bri, familia)
+)
+""")
+
 conn.commit()
 
 # Índices para performance em buscas por campo mais usados
@@ -170,6 +184,7 @@ cursor.execute("CREATE INDEX IF NOT EXISTS idx_certificados_ce_bri ON certificad
 cursor.execute("CREATE INDEX IF NOT EXISTS idx_certificados_ip_bri ON certificados(ip_bri)")
 cursor.execute("CREATE INDEX IF NOT EXISTS idx_s5_itens_modelo ON sistema5_itens(modelo)")
 cursor.execute("CREATE INDEX IF NOT EXISTS idx_s5_itens_arquivo_id ON sistema5_itens(arquivo_id)")
+cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_bri_familias_ce_fam ON ip_bri_familias(ce_bri, familia)")
 conn.commit()
 
 # ==========================================
@@ -733,6 +748,12 @@ def garantir_estrutura_banco():
         ("registros", "data_cadastro", "TEXT"),
         ("sistema5_itens", "familia", "TEXT"),
         ("sistema5_itens", "item", "TEXT"),
+        ("ip_bri_familias", "ce_bri", "TEXT"),
+        ("ip_bri_familias", "familia", "TEXT"),
+        ("ip_bri_familias", "ip_bri", "TEXT"),
+        ("ip_bri_familias", "observacao", "TEXT"),
+        ("ip_bri_familias", "data_cadastro", "TEXT"),
+        ("ip_bri_familias", "data_atualizacao", "TEXT"),
     ]
 
     for tabela, coluna, tipo in ajustes:
@@ -1659,6 +1680,122 @@ def atualizar_endereco_fabrica_existente(cliente_base, fabrica, novo_endereco):
 
 
 
+
+
+# ==========================================
+# IP-BRI MANUAL POR FAMÍLIA
+# ==========================================
+
+def normalizar_ip_bri_manual(valor):
+    texto = clean(valor).upper()
+
+    if not texto:
+        return ""
+
+    if texto.startswith("IP-BRI-"):
+        return texto
+
+    if texto.startswith("IP-"):
+        numero = texto.replace("IP-", "")
+        return f"IP-BRI-{numero}"
+
+    return f"IP-BRI-{texto}"
+
+
+def salvar_ip_bri_familia(ce_bri, familia, ip_bri, observacao=""):
+    ce_bri = clean(ce_bri).upper()
+    familia = normalizar_familia(familia)
+    ip_bri = normalizar_ip_bri_manual(ip_bri)
+    observacao = clean(observacao)
+
+    if not ce_bri or not familia or not ip_bri:
+        return False, "Informe CE-BRI, família e IP-BRI."
+
+    existente = cursor.execute("""
+    SELECT id
+    FROM ip_bri_familias
+    WHERE UPPER(ce_bri) = UPPER(?)
+    AND familia = ?
+    """, (ce_bri, familia)).fetchone()
+
+    agora_txt = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+
+    if existente:
+        cursor.execute("""
+        UPDATE ip_bri_familias
+        SET ip_bri = ?, observacao = ?, data_atualizacao = ?
+        WHERE id = ?
+        """, (ip_bri, observacao, agora_txt, existente[0]))
+    else:
+        cursor.execute("""
+        INSERT INTO ip_bri_familias (
+            ce_bri, familia, ip_bri, observacao, data_cadastro, data_atualizacao
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+        """, (ce_bri, familia, ip_bri, observacao, agora_txt, agora_txt))
+
+    conn.commit()
+    return True, f"IP-BRI {ip_bri} salvo para {ce_bri} / família {familia}."
+
+
+def buscar_ip_bri_manual_familia(ce_bri, familia):
+    ce_bri = clean(ce_bri).upper()
+    familia = normalizar_familia(familia)
+
+    if not ce_bri or not familia:
+        return ""
+
+    resultado = pd.read_sql_query("""
+    SELECT ip_bri
+    FROM ip_bri_familias
+    WHERE UPPER(ce_bri) = UPPER(?)
+    AND familia = ?
+    ORDER BY id DESC
+    LIMIT 1
+    """, conn, params=(ce_bri, familia))
+
+    if resultado.empty:
+        return ""
+
+    return clean(resultado.iloc[0]["ip_bri"])
+
+
+def listar_ip_bri_pendentes_sistema5():
+    return pd.read_sql_query("""
+    SELECT DISTINCT
+        s.cliente_base,
+        s.categoria,
+        s.fabrica,
+        s.ce_bri,
+        s.familia,
+        s.tipo_processo,
+        s.ip_processo,
+        s.data_processo,
+        s.arquivo_nome
+    FROM sistema5_itens s
+    LEFT JOIN certificados c
+    ON UPPER(c.ce_bri) = UPPER(s.ce_bri)
+    AND c.familia = s.familia
+    LEFT JOIN ip_bri_familias m
+    ON UPPER(m.ce_bri) = UPPER(s.ce_bri)
+    AND m.familia = s.familia
+    WHERE s.ce_bri IS NOT NULL
+    AND s.ce_bri != ''
+    AND s.familia IS NOT NULL
+    AND s.familia != ''
+    AND c.ip_bri IS NULL
+    AND m.ip_bri IS NULL
+    ORDER BY s.cliente_base, s.fabrica, CAST(s.familia AS INTEGER), s.data_processo DESC
+    """, conn)
+
+
+def listar_ip_bri_manuais():
+    return pd.read_sql_query("""
+    SELECT ce_bri, familia, ip_bri, observacao, data_cadastro, data_atualizacao
+    FROM ip_bri_familias
+    ORDER BY ce_bri, CAST(familia AS INTEGER)
+    """, conn)
+
 # ==========================================
 # PESQUISA AVANÇADA
 # ==========================================
@@ -2341,7 +2478,11 @@ def buscar_item_sistema5_confirmacao(valor_ref):
     if ip_bri_oficial:
         item["IP_BRI"] = ip_bri_oficial
     else:
-        item["IP_BRI"] = familia
+        ip_bri_manual = buscar_ip_bri_manual_familia(ce_bri, familia)
+        if ip_bri_manual:
+            item["IP_BRI"] = ip_bri_manual
+        else:
+            item["IP_BRI"] = familia
 
     if ce_bri and familia:
         registro_complementar = pd.read_sql_query("""
@@ -2711,14 +2852,15 @@ try:
 except Exception as e:
     st.sidebar.warning(f"Backup geral indisponível: {e}")
 
-aba0, aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
+aba0, aba1, aba2, aba3, aba4, aba5, aba6, aba7 = st.tabs([
     "🏠 Início",
     "PDF → XML",
     "Banco de Certificados",
     "Registros",
     "Preenchimento de Confirmação",
     "Pesquisa Avançada",
-    "Sistema 5"
+    "Sistema 5",
+    "IP-BRI Pendentes"
 ])
 
 # ==========================================
@@ -4339,5 +4481,125 @@ with aba6:
             "sistema5_resumo.csv",
             "text/csv",
             key="download_sistema5_resumo"
+        )
+
+
+
+# ==========================================
+# ABA 7 - IP-BRI PENDENTES
+# ==========================================
+
+with aba7:
+    st.title("IP-BRI Pendentes")
+
+    st.info(
+        "Use esta aba para cadastrar manualmente o IP-BRI de famílias que aparecem no Sistema 5, "
+        "mas ainda não possuem certificado oficial emitido/cadastrado."
+    )
+
+    st.subheader("Famílias pendentes encontradas no Sistema 5")
+
+    pendentes_ip_bri = listar_ip_bri_pendentes_sistema5()
+
+    if pendentes_ip_bri.empty:
+        st.success("Nenhuma família pendente de IP-BRI encontrada ✅")
+    else:
+        st.warning(f"{len(pendentes_ip_bri)} família(s) pendente(s) de IP-BRI.")
+        st.dataframe(pendentes_ip_bri, use_container_width=True)
+
+        st.download_button(
+            "Baixar pendentes CSV",
+            pendentes_ip_bri.to_csv(index=False, sep=";").encode("ISO-8859-1", errors="replace"),
+            "ip_bri_pendentes.csv",
+            "text/csv",
+            key="download_ip_bri_pendentes"
+        )
+
+        st.divider()
+        st.subheader("Cadastrar IP-BRI de uma família pendente")
+
+        opcoes_pendentes = []
+        for _, linha in pendentes_ip_bri.iterrows():
+            label = (
+                f"{linha.get('cliente_base', '')} | "
+                f"{linha.get('fabrica', '')} | "
+                f"{linha.get('ce_bri', '')} | "
+                f"FAM {linha.get('familia', '')} | "
+                f"{linha.get('ip_processo', '')}"
+            )
+            opcoes_pendentes.append(label)
+
+        escolha_pendente = st.selectbox(
+            "Selecione a família pendente",
+            opcoes_pendentes,
+            key="select_ip_bri_pendente"
+        )
+
+        idx_escolhido = opcoes_pendentes.index(escolha_pendente)
+        linha_escolhida = pendentes_ip_bri.iloc[idx_escolhido]
+
+        col_ip1, col_ip2 = st.columns(2)
+
+        with col_ip1:
+            st.text_input("CE-BRI", value=clean(linha_escolhida.get("ce_bri", "")), disabled=True, key="ip_pendente_ce_bri")
+            st.text_input("Família", value=clean(linha_escolhida.get("familia", "")), disabled=True, key="ip_pendente_familia")
+
+        with col_ip2:
+            novo_ip_bri_manual = st.text_input("IP-BRI a cadastrar", placeholder="Ex: IP-BRI-1550-26 ou 1550-26", key="novo_ip_bri_manual")
+            obs_ip_bri_manual = st.text_input("Observação", placeholder="Opcional", key="obs_ip_bri_manual")
+
+        if st.button("Salvar IP-BRI desta família", key="salvar_ip_bri_pendente"):
+            ok, mensagem = salvar_ip_bri_familia(
+                linha_escolhida.get("ce_bri", ""),
+                linha_escolhida.get("familia", ""),
+                novo_ip_bri_manual,
+                obs_ip_bri_manual
+            )
+
+            if ok:
+                st.success(mensagem)
+            else:
+                st.error(mensagem)
+
+    st.divider()
+    st.subheader("Cadastro manual direto")
+
+    col_manual1, col_manual2, col_manual3 = st.columns(3)
+
+    with col_manual1:
+        ce_manual = st.text_input("CE-BRI", placeholder="CE-BRI-INNAC-02484-01A", key="manual_ce_bri_ip")
+
+    with col_manual2:
+        fam_manual = st.text_input("Família", placeholder="Ex: 12", key="manual_familia_ip")
+
+    with col_manual3:
+        ip_manual = st.text_input("IP-BRI", placeholder="Ex: IP-BRI-1550-26", key="manual_ip_bri")
+
+    obs_manual = st.text_input("Observação manual", placeholder="Opcional", key="manual_obs_ip_bri")
+
+    if st.button("Salvar cadastro manual", key="salvar_ip_bri_manual_direto"):
+        ok, mensagem = salvar_ip_bri_familia(ce_manual, fam_manual, ip_manual, obs_manual)
+
+        if ok:
+            st.success(mensagem)
+        else:
+            st.error(mensagem)
+
+    st.divider()
+    st.subheader("IP-BRI manuais já cadastrados")
+
+    manuais = listar_ip_bri_manuais()
+
+    if manuais.empty:
+        st.info("Nenhum IP-BRI manual cadastrado ainda.")
+    else:
+        st.dataframe(manuais, use_container_width=True)
+
+        st.download_button(
+            "Baixar IP-BRI manuais CSV",
+            manuais.to_csv(index=False, sep=";").encode("ISO-8859-1", errors="replace"),
+            "ip_bri_manuais.csv",
+            "text/csv",
+            key="download_ip_bri_manuais"
         )
 
