@@ -189,37 +189,6 @@ def clean(x):
 
 
 
-
-def normalizar_modelo_busca(valor):
-    """
-    Normaliza referência/modelo para comparação segura.
-    Ex:
-    SK-001, SK‑001, SK 001, SK001 -> SK001
-    """
-    texto = clean(valor).upper()
-
-    for h in ["‐", "‑", "‒", "–", "—", "−", "﹣", "－"]:
-        texto = texto.replace(h, "-")
-
-    texto = texto.replace("\u200b", "")
-    texto = texto.replace("\u200c", "")
-    texto = texto.replace("\u200d", "")
-    texto = texto.replace("\ufeff", "")
-
-    texto = re.sub(r"[^A-Z0-9]", "", texto)
-
-    return texto
-
-
-def sql_normalizar_modelo(campo):
-    expr = f"UPPER(TRIM({campo}))"
-
-    for char in [" ", "-", ".", "/", "_", "‐", "‑", "‒", "–", "—", "−", "﹣", "－"]:
-        expr = f"REPLACE({expr}, '{char}', '')"
-
-    return expr
-
-
 def corrigir_texto(texto):
     if texto is None:
         return ""
@@ -1464,10 +1433,7 @@ def buscar_item_confirmacao(valor_ref):
     if item_s5:
         return item_s5
 
-    ref_normalizada = normalizar_modelo_busca(ref)
-    modelo_norm_sql = sql_normalizar_modelo("i.modelo")
-
-    resultado = pd.read_sql_query(f"""
+    resultado = pd.read_sql_query("""
     SELECT
         i.marca AS MARCA,
         i.modelo AS MODELO,
@@ -1483,21 +1449,12 @@ def buscar_item_confirmacao(valor_ref):
     LEFT JOIN registros r
     ON UPPER(r.ce_bri) = UPPER(c.ce_bri)
     AND r.familia = c.familia
-    WHERE
-        UPPER(TRIM(i.modelo)) = UPPER(TRIM(?))
-        OR UPPER(TRIM(i.modelo)) LIKE UPPER(TRIM(?) || ' -%')
-        OR UPPER(TRIM(i.modelo)) LIKE UPPER(TRIM(?) || '%')
-        OR {modelo_norm_sql} = ?
-        OR {modelo_norm_sql} LIKE ?
+    WHERE UPPER(TRIM(i.modelo)) = UPPER(TRIM(?))
+       OR UPPER(TRIM(i.modelo)) LIKE UPPER(TRIM(?) || ' -%')
+       OR UPPER(TRIM(i.modelo)) LIKE UPPER(TRIM(?) || '%')
     ORDER BY c.rev DESC, c.ip_bri DESC
     LIMIT 1
-    """, conn, params=(
-        ref,
-        ref,
-        ref,
-        ref_normalizada,
-        f"{ref_normalizada}%"
-    ))
+    """, conn, params=(ref, ref, ref))
 
     if resultado.empty:
         return None
@@ -2239,10 +2196,7 @@ def buscar_item_sistema5_confirmacao(valor_ref):
     if not ref:
         return None
 
-    ref_normalizada = normalizar_modelo_busca(ref)
-    modelo_norm_sql = sql_normalizar_modelo("modelo")
-
-    resultado = pd.read_sql_query(f"""
+    resultado = pd.read_sql_query("""
     SELECT
         marca AS MARCA,
         modelo AS MODELO,
@@ -2258,21 +2212,12 @@ def buscar_item_sistema5_confirmacao(valor_ref):
         familia AS FAMILIA,
         arquivo_nome AS ARQUIVO_ORIGEM
     FROM sistema5_itens
-    WHERE
-        UPPER(TRIM(modelo)) = UPPER(TRIM(?))
-        OR UPPER(TRIM(modelo)) LIKE UPPER(TRIM(?) || ' -%')
-        OR UPPER(TRIM(modelo)) LIKE UPPER(TRIM(?) || '%')
-        OR {modelo_norm_sql} = ?
-        OR {modelo_norm_sql} LIKE ?
+    WHERE UPPER(TRIM(modelo)) = UPPER(TRIM(?))
+       OR UPPER(TRIM(modelo)) LIKE UPPER(TRIM(?) || ' -%')
+       OR UPPER(TRIM(modelo)) LIKE UPPER(TRIM(?) || '%')
     ORDER BY COALESCE(data_processo, '1900-01-01') DESC, id DESC
     LIMIT 1
-    """, conn, params=(
-        ref,
-        ref,
-        ref,
-        ref_normalizada,
-        f"{ref_normalizada}%"
-    ))
+    """, conn, params=(ref, ref, ref))
 
     if resultado.empty:
         return None
@@ -2282,6 +2227,10 @@ def buscar_item_sistema5_confirmacao(valor_ref):
     ce_bri = clean(item.get("CE_BRI"))
     familia = clean(item.get("FAMILIA"))
 
+    # REGRA:
+    # Se o item veio do Sistema 5, o IP do processo fica separado em IP_PROCESSO.
+    # O campo IP_BRI deve tentar puxar o IP-BRI oficial pelo CE-BRI + família.
+    # Se ainda não existir certificado oficial emitido, usa a família encontrada.
     ip_bri_oficial = None
 
     if ce_bri and familia:
