@@ -2928,7 +2928,13 @@ def listar_fabricas_existentes_para_sistema5(cliente_base=""):
 
 def extrair_codigo_fabrica_nome(nome):
     texto = clean(nome).upper()
-    match = re.search(r"\bF\s*0*(\d{1,3})\b", texto)
+
+    # Remove a parte do IP do nome antes de procurar a fábrica
+    # Ex: "INCLUSÃO 01-03-26 F01 IP-0707-26" → remove "IP-0707-26"
+    texto_sem_ip = re.sub(r"\bIP[-\s]*[\d\-]+", "", texto)
+
+    # Procura padrão de fábrica: F01, F02, F016, etc — exige espaço ou início antes do F
+    match = re.search(r"(?<![A-Z\d])F\s*0*(\d{1,3})(?!\d)", texto_sem_ip)
     if match:
         numero = int(match.group(1))
         return f"F{numero:02d}"
@@ -5247,9 +5253,24 @@ with aba6:
                 erros.append({"arquivo": arquivo_s5.name, "motivo": "IP não encontrado no nome do arquivo"})
                 continue
 
-            fab_final = dados_fab_arq.get("fabrica", fabrica_s5)            if dados_fab_arq else fabrica_s5
-            ce_final  = dados_fab_arq.get("ce_bri", ce_bri_s5)              if dados_fab_arq else ce_bri_s5
-            end_final = dados_fab_arq.get("endereco_fabrica", endereco_s5)  if dados_fab_arq else endereco_s5
+            # Fábrica selecionada manualmente SEMPRE tem prioridade.
+            # A detecção automática pelo nome do arquivo só preenche CE-BRI e endereço
+            # se o usuário não tiver informado — nunca sobrescreve a fábrica escolhida.
+            fab_final = fabrica_s5
+            ce_final  = ce_bri_s5
+            end_final = endereco_s5
+
+            # Se o usuário não preencheu fábrica manualmente, tenta puxar dos registros
+            if not clean(fab_final) and dados_fab_arq:
+                fab_final = dados_fab_arq.get("fabrica", "")
+                ce_final  = dados_fab_arq.get("ce_bri", "")
+                end_final = dados_fab_arq.get("endereco_fabrica", "")
+            elif dados_fab_arq:
+                # Fábrica manual definida — completa só CE-BRI e endereço se estiverem vazios
+                if not clean(ce_final):
+                    ce_final  = dados_fab_arq.get("ce_bri", ce_final)
+                if not clean(end_final):
+                    end_final = dados_fab_arq.get("endereco_fabrica", end_final)
 
             dup = ip_processo_ja_existe_sistema5(ip_extraido, cliente_s5, fab_final)
 
