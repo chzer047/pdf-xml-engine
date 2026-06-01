@@ -40,6 +40,13 @@ conn = sqlite3.connect(
 
 cursor = conn.cursor()
 
+# Otimizações de performance do SQLite
+cursor.execute("PRAGMA journal_mode=WAL")       # leituras não bloqueiam escritas
+cursor.execute("PRAGMA synchronous=NORMAL")     # mais rápido que FULL, ainda seguro
+cursor.execute("PRAGMA cache_size=-32000")      # 32MB de cache em memória
+cursor.execute("PRAGMA temp_store=MEMORY")      # operações temporárias em RAM
+conn.commit()
+
 # ==========================================
 # TABELAS
 # ==========================================
@@ -2979,6 +2986,33 @@ def buscar_fabrica_por_codigo_s5(cliente_base, codigo_fabrica):
     return resultado.iloc[0].to_dict()
 
 
+@st.cache_data(ttl=30, show_spinner=False)
+def listar_processos_sistema5_cached():
+    return pd.read_sql_query("""
+    SELECT
+        a.id AS arquivo_id,
+        c.categoria,
+        c.cliente_base,
+        f.fabrica,
+        f.ce_bri,
+        f.endereco_fabrica,
+        a.tipo_processo,
+        a.ip_processo,
+        a.data_processo,
+        a.arquivo_nome,
+        COUNT(i.id) AS qtd_itens
+    FROM sistema5_arquivos a
+    INNER JOIN sistema5_clientes c ON c.id = a.cliente_id
+    INNER JOIN sistema5_fabricas f ON f.id = a.fabrica_id
+    LEFT JOIN sistema5_itens i ON i.arquivo_id = a.id
+    GROUP BY
+        a.id, c.categoria, c.cliente_base, f.fabrica,
+        f.ce_bri, f.endereco_fabrica, a.tipo_processo,
+        a.ip_processo, a.data_processo, a.arquivo_nome
+    ORDER BY c.categoria, c.cliente_base, f.fabrica, a.data_processo DESC, a.id DESC
+    """, conn)
+
+
 def listar_processos_sistema5():
     return pd.read_sql_query("""
     SELECT
@@ -3645,19 +3679,21 @@ aviso_backup_diario()
 
 try:
     st.sidebar.header("Backup Geral")
-
     st.sidebar.caption("Backup centralizado: baixar e restaurar tudo pelo mesmo local.")
 
-    st.sidebar.download_button(
-        "⬇️ BAIXAR BACKUP GERAL ZIP",
-        gerar_backup_geral_zip(),
-        "backup_geral_c_xml_br_engine.zip",
-        "application/zip",
-        key="backup_geral_sidebar"
-    )
+    if st.sidebar.button("⬇️ GERAR E BAIXAR BACKUP ZIP", key="gerar_backup_btn"):
+        st.session_state["backup_zip_cache"] = gerar_backup_geral_zip()
+
+    if "backup_zip_cache" in st.session_state and st.session_state["backup_zip_cache"]:
+        st.sidebar.download_button(
+            "💾 Clique aqui para baixar o backup",
+            st.session_state["backup_zip_cache"],
+            "backup_geral_c_xml_br_engine.zip",
+            "application/zip",
+            key="backup_geral_sidebar"
+        )
 
     st.sidebar.divider()
-
     st.sidebar.subheader("Restaurar backup")
 
     backup_geral_upload = st.sidebar.file_uploader(
@@ -5347,6 +5383,7 @@ with aba6:
                             )
 
                             st.success(f"{total} itens salvos no Sistema 5 para o processo {ip_extraido} ✅")
+                            st.cache_data.clear()
 
                 except Exception as e:
                     st.error(f"Erro ao ler Excel do Sistema 5: {e}")
@@ -5354,7 +5391,7 @@ with aba6:
     st.divider()
     st.subheader("Estrutura salva no Sistema 5")
 
-    processos_s5 = listar_processos_sistema5()
+    processos_s5 = listar_processos_sistema5_cached()
 
     if processos_s5.empty:
         st.info("Nenhum processo salvo ainda.")
@@ -5449,6 +5486,7 @@ with aba6:
                                                 try:
                                                     qtd_del = deletar_processo_sistema5(arquivo_id)
                                                     st.success(f"Processo {proc.get('ip_processo', '')} removido. {qtd_del} itens deletados ✅")
+                                                    st.cache_data.clear()
                                                     st.rerun()
                                                 except Exception as e:
                                                     st.error(f"Erro ao deletar: {e}")
@@ -5986,3 +6024,4 @@ with aba9:
                     st.success(mensagem)
                 else:
                     st.error(mensagem)
+
