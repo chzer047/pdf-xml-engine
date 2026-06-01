@@ -1523,6 +1523,28 @@ def aviso_backup_diario():
 
 
 
+@st.cache_data(ttl=10, show_spinner=False)
+def metricas_banco():
+    """Métricas gerais do banco — cached 10s para evitar 12 queries COUNT redundantes."""
+    try:
+        total_certs   = cursor.execute("SELECT COUNT(*) FROM certificados").fetchone()[0]
+        total_itens   = cursor.execute("SELECT COUNT(*) FROM itens").fetchone()[0]
+        total_marcas  = cursor.execute("SELECT COUNT(DISTINCT marca) FROM itens WHERE marca IS NOT NULL AND marca != ''").fetchone()[0]
+        total_regs    = cursor.execute("SELECT COUNT(*) FROM registros").fetchone()[0]
+        total_s5      = cursor.execute("SELECT COUNT(*) FROM sistema5_itens").fetchone()[0]
+        ultimo_cert   = cursor.execute("SELECT ip_bri FROM certificados ORDER BY id DESC LIMIT 1").fetchone()
+        return {
+            "total_certs":  total_certs,
+            "total_itens":  total_itens,
+            "total_marcas": total_marcas,
+            "total_regs":   total_regs,
+            "total_s5":     total_s5,
+            "ultimo_cert":  ultimo_cert[0] if ultimo_cert else "—",
+        }
+    except Exception:
+        return {}
+
+
 def atualizar_familias_certificados():
     """
     Executada UMA VEZ na inicialização.
@@ -1942,6 +1964,7 @@ def buscar_ip_bri_manual_familia(ce_bri, familia):
     return clean(resultado.iloc[0]["ip_bri"])
 
 
+@st.cache_data(ttl=20, show_spinner=False)
 def listar_ip_bri_pendentes_sistema5():
     return pd.read_sql_query("""
     SELECT
@@ -1984,6 +2007,7 @@ def listar_ip_bri_pendentes_sistema5():
         CAST(s.familia AS INTEGER)
     """, conn)
 
+@st.cache_data(ttl=20, show_spinner=False)
 def listar_ip_bri_manuais():
     return pd.read_sql_query("""
     SELECT
@@ -2489,6 +2513,7 @@ def ler_excel_inclusao_sistema5(uploaded_file):
     return df_final
 
 
+@st.cache_data(ttl=15, show_spinner=False)
 def listar_clientes_sistema5_banco(categoria=""):
     """
     Retorna clientes já salvos na tabela sistema5_clientes.
@@ -2513,6 +2538,7 @@ def listar_clientes_sistema5_banco(categoria=""):
     """, conn)
 
 
+@st.cache_data(ttl=15, show_spinner=False)
 def listar_fabricas_sistema5_banco(cliente_base="", categoria=""):
     """
     Retorna fabricas de duas fontes: sistema5_fabricas + registros.
@@ -2563,6 +2589,7 @@ def listar_fabricas_sistema5_banco(cliente_base="", categoria=""):
     return combinado.sort_values("fabrica").reset_index(drop=True)
 
 
+@st.cache_data(ttl=30, show_spinner=False)
 def buscar_fabricante_por_fabrica_s5(cliente_base, fabrica, ce_bri=""):
     """
     Para RECERTIFICACAO: busca a marca mais frequente nos itens
@@ -3060,6 +3087,7 @@ def listar_processos_sistema5():
     """, conn)
 
 
+@st.cache_data(ttl=30, show_spinner=False)
 def buscar_itens_processo_sistema5(arquivo_id, termo=""):
     termo = clean(termo)
 
@@ -3521,6 +3549,7 @@ def diagnosticar_referencia_confirmacao(ref):
 # AUDITORIA / CORREÇÃO DE CÓDIGOS DE BARRAS
 # ==========================================
 
+@st.cache_data(ttl=20, show_spinner=False)
 def listar_codigos_suspeitos_sistema5():
     """
     Lista códigos do Sistema 5 que podem ter perdido zero à esquerda.
@@ -3553,6 +3582,7 @@ def listar_codigos_suspeitos_sistema5():
     """, conn)
 
 
+@st.cache_data(ttl=20, show_spinner=False)
 def listar_codigos_suspeitos_certificados():
     """
     Lista códigos dos certificados oficiais que podem ter perdido zero à esquerda.
@@ -3748,10 +3778,11 @@ with aba0:
 
     # Status rápido do banco
     try:
-        total_certs_home = cursor.execute("SELECT COUNT(*) FROM certificados").fetchone()[0]
-        total_itens_home = cursor.execute("SELECT COUNT(*) FROM itens").fetchone()[0]
-        total_regs_home  = cursor.execute("SELECT COUNT(*) FROM registros").fetchone()[0]
-        total_s5_home    = cursor.execute("SELECT COUNT(*) FROM sistema5_itens").fetchone()[0]
+        _m = metricas_banco()
+        total_certs_home = _m.get("total_certs", 0)
+        total_itens_home = _m.get("total_itens", 0)
+        total_regs_home  = _m.get("total_regs", 0)
+        total_s5_home    = _m.get("total_s5", 0)
 
         st.subheader("📊 Status do banco")
         c1, c2, c3, c4 = st.columns(4)
@@ -3974,8 +4005,10 @@ REV: {dados_certificado['rev']}
 
             if status == "novo":
                 st.success(mensagem)
+                st.cache_data.clear()
             elif status == "atualizado":
                 st.warning(mensagem)
+                st.cache_data.clear()
             elif status == "ignorado":
                 st.info(mensagem)
             else:
@@ -4019,11 +4052,11 @@ with aba2:
 
     # --- Dashboard de métricas ---
     try:
-        total_certs = cursor.execute("SELECT COUNT(*) FROM certificados").fetchone()[0]
-        total_itens_banco = cursor.execute("SELECT COUNT(*) FROM itens").fetchone()[0]
-        total_marcas = cursor.execute("SELECT COUNT(DISTINCT marca) FROM itens WHERE marca IS NOT NULL AND marca != ''").fetchone()[0]
-        ultimo_cert = cursor.execute("SELECT ip_bri FROM certificados ORDER BY id DESC LIMIT 1").fetchone()
-        ultimo_cert_str = ultimo_cert[0] if ultimo_cert else "—"
+        _m = metricas_banco()
+        total_certs       = _m.get("total_certs", 0)
+        total_itens_banco = _m.get("total_itens", 0)
+        total_marcas      = _m.get("total_marcas", 0)
+        ultimo_cert_str   = _m.get("ultimo_cert", "—")
 
         col_m1, col_m2, col_m3, col_m4 = st.columns(4)
         col_m1.metric("📄 Certificados", total_certs)
@@ -4605,6 +4638,7 @@ with aba3:
                     )
 
                     st.success(f"{total_salvo} registros salvos no banco para a base {cliente_base} ✅")
+                    st.cache_data.clear()
 
                 st.download_button(
                     "Baixar registros tratados CSV",
@@ -4895,9 +4929,10 @@ with aba4:
 
     # Aviso de banco vazio — aba 4 não funciona sem dados
     try:
-        _total_cert_aba4 = cursor.execute("SELECT COUNT(*) FROM certificados").fetchone()[0]
-        _total_s5_aba4   = cursor.execute("SELECT COUNT(*) FROM sistema5_itens").fetchone()[0]
-        _total_reg_aba4  = cursor.execute("SELECT COUNT(*) FROM registros").fetchone()[0]
+        _m = metricas_banco()
+        _total_cert_aba4 = _m.get("total_certs", 0)
+        _total_s5_aba4   = _m.get("total_s5", 0)
+        _total_reg_aba4  = _m.get("total_regs", 0)
 
         if _total_cert_aba4 == 0 and _total_s5_aba4 == 0:
             st.error(
@@ -6115,3 +6150,4 @@ with aba9:
                     st.success(mensagem)
                 else:
                     st.error(mensagem)
+
