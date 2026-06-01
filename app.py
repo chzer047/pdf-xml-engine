@@ -4967,7 +4967,7 @@ with aba6:
         "Envie um ou mais Excels com IP no nome",
         type=["xlsx", "xls"],
         accept_multiple_files=True,
-        key="s5_excel_multi"
+        key="s5_excel_multi_v2"
     )
 
     if arquivos_s5:
