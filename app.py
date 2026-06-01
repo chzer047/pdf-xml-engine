@@ -2510,19 +2510,21 @@ def listar_fabricas_sistema5_banco(cliente_base="", categoria=""):
     """
     Retorna fabricas de duas fontes: sistema5_fabricas + registros.
     Unifica para o selectbox de fabrica.
+    Retorna vazio se cliente_base não for informado — nunca mistura clientes.
     """
     cliente_base = clean(cliente_base).upper()
     categoria = normalizar_categoria_sistema5(categoria) if categoria else ""
 
-    params_s5 = []
-    where_s5_parts = []
-    if cliente_base:
-        where_s5_parts.append("UPPER(c.cliente_base) = UPPER(?)")
-        params_s5.append(cliente_base)
+    # Sem cliente definido, não faz sentido listar fábricas
+    if not cliente_base:
+        return pd.DataFrame(columns=["fabrica", "ce_bri", "endereco_fabrica", "origem"])
+
+    params_s5 = [cliente_base]
+    where_s5_parts = ["UPPER(c.cliente_base) = UPPER(?)"]
     if categoria:
         where_s5_parts.append("c.categoria = ?")
         params_s5.append(categoria)
-    where_s5 = ("WHERE " + " AND ".join(where_s5_parts)) if where_s5_parts else ""
+    where_s5 = "WHERE " + " AND ".join(where_s5_parts)
 
     df_s5 = pd.read_sql_query(f"""
     SELECT DISTINCT
@@ -2537,20 +2539,17 @@ def listar_fabricas_sistema5_banco(cliente_base="", categoria=""):
     ORDER BY f.fabrica
     """, conn, params=tuple(params_s5))
 
-    params_reg = [cliente_base] if cliente_base else []
-    where_reg = "WHERE UPPER(cliente_base) = UPPER(?)" if cliente_base else "WHERE 1=1"
-
-    df_reg = pd.read_sql_query(f"""
+    df_reg = pd.read_sql_query("""
     SELECT DISTINCT
         fabrica,
         ce_bri,
         endereco_fabrica,
         'Registros' AS origem
     FROM registros
-    {where_reg}
+    WHERE UPPER(cliente_base) = UPPER(?)
     AND fabrica IS NOT NULL AND fabrica != ''
     ORDER BY fabrica
-    """, conn, params=tuple(params_reg))
+    """, conn, params=(cliente_base,))
 
     combinado = pd.concat([df_reg, df_s5], ignore_index=True)
     combinado = combinado.drop_duplicates(subset=["fabrica"], keep="first")
@@ -5970,3 +5969,4 @@ with aba9:
                     st.success(mensagem)
                 else:
                     st.error(mensagem)
+
