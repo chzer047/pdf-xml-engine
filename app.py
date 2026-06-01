@@ -5054,42 +5054,29 @@ with aba6:
         opcoes_fabrica_s5 = []
 
         for _, linha_fab in fabricas_disponiveis_s5.iterrows():
-            fab = clean(linha_fab.get("fabrica", ""))
-            ce = clean(linha_fab.get("ce_bri", ""))
+            fab    = clean(linha_fab.get("fabrica", ""))
+            ce     = clean(linha_fab.get("ce_bri", ""))
             origem = clean(linha_fab.get("origem", ""))
             opcoes_fabrica_s5.append(f"{fab} | {ce} ({origem})")
 
-        escolha_fabrica_s5 = st.selectbox(
+        idx_escolhido_fab = st.selectbox(
             "Selecione uma fábrica",
-            opcoes_fabrica_s5,
+            range(len(opcoes_fabrica_s5)),
+            format_func=lambda i: opcoes_fabrica_s5[i],
             key="s5_fabrica_existente_select"
         )
 
-        fabrica_escolhida = escolha_fabrica_s5.split("|")[0].strip()
-        ce_escolhido = escolha_fabrica_s5.split("|")[1].split("(")[0].strip() if "|" in escolha_fabrica_s5 else ""
+        # Pega os dados direto do DataFrame pelo índice — sem parse de string
+        linha_selecionada = fabricas_disponiveis_s5.iloc[idx_escolhido_fab]
+        fabrica_padrao  = clean(linha_selecionada.get("fabrica", ""))
+        ce_padrao       = clean(linha_selecionada.get("ce_bri", ""))
+        endereco_padrao = clean(linha_selecionada.get("endereco_fabrica", ""))
 
-        # Tenta puxar de registros primeiro, depois sistema5_fabricas
-        dados_fabrica_sugeridos = buscar_dados_fabrica_existente(
-            cliente_s5,
-            fabrica_escolhida,
-            ce_escolhido
-        )
-
-        if not dados_fabrica_sugeridos:
-            # Fallback: busca direto em sistema5_fabricas
-            row_s5_fab = pd.read_sql_query("""
-            SELECT f.fabrica, f.ce_bri, f.endereco_fabrica
-            FROM sistema5_fabricas f
-            INNER JOIN sistema5_clientes c ON c.id = f.cliente_id
-            WHERE UPPER(f.fabrica) = UPPER(?)
-            ORDER BY f.id DESC LIMIT 1
-            """, conn, params=(fabrica_escolhida,))
-            if not row_s5_fab.empty:
-                dados_fabrica_sugeridos = row_s5_fab.iloc[0].to_dict()
-
-        fabrica_padrao = dados_fabrica_sugeridos.get("fabrica", fabrica_escolhida) if dados_fabrica_sugeridos else fabrica_escolhida
-        ce_padrao = dados_fabrica_sugeridos.get("ce_bri", ce_escolhido) if dados_fabrica_sugeridos else ce_escolhido
-        endereco_padrao = dados_fabrica_sugeridos.get("endereco_fabrica", "") if dados_fabrica_sugeridos else ""
+        dados_fabrica_sugeridos = {
+            "fabrica":           fabrica_padrao,
+            "ce_bri":            ce_padrao,
+            "endereco_fabrica":  endereco_padrao,
+        }
 
         st.success("Dados da fábrica carregados ✅")
 
@@ -5938,3 +5925,4 @@ with aba9:
                     st.success(mensagem)
                 else:
                     st.error(mensagem)
+
