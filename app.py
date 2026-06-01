@@ -5230,163 +5230,206 @@ with aba6:
     )
 
     if arquivos_s5:
-        st.info(
-            f"{len(arquivos_s5)} arquivo(s) selecionado(s). "
-            "Cada arquivo será tratado como um processo separado, com validação e botão de salvar individual."
-        )
+        st.markdown(f"**{len(arquivos_s5)} arquivo(s) carregado(s).** Revise abaixo e clique em **Salvar todos** no final.")
+
+        # ---- Pré-processamento: lê todos os arquivos e monta fila ----
+        fila = []
+        erros = []
 
         for idx_arquivo, arquivo_s5 in enumerate(arquivos_s5):
+            ip_extraido          = extrair_ip_processo(arquivo_s5.name)
+            data_extraida        = extrair_data_processo(arquivo_s5.name)
+            tipo_detectado       = detectar_tipo_processo(arquivo_s5.name)
+            fabrica_detectada_nm = extrair_codigo_fabrica_nome(arquivo_s5.name)
+            dados_fab_arq        = buscar_fabrica_por_codigo_s5(cliente_s5, fabrica_detectada_nm) if fabrica_detectada_nm else None
+
+            if not ip_extraido:
+                erros.append({"arquivo": arquivo_s5.name, "motivo": "IP não encontrado no nome do arquivo"})
+                continue
+
+            fab_final = dados_fab_arq.get("fabrica", fabrica_s5)            if dados_fab_arq else fabrica_s5
+            ce_final  = dados_fab_arq.get("ce_bri", ce_bri_s5)              if dados_fab_arq else ce_bri_s5
+            end_final = dados_fab_arq.get("endereco_fabrica", endereco_s5)  if dados_fab_arq else endereco_s5
+
+            dup = ip_processo_ja_existe_sistema5(ip_extraido, cliente_s5, fab_final)
+
+            try:
+                df_arq = ler_excel_inclusao_sistema5(arquivo_s5)
+            except Exception as e:
+                erros.append({"arquivo": arquivo_s5.name, "motivo": str(e)})
+                continue
+
+            if df_arq.empty:
+                erros.append({"arquivo": arquivo_s5.name, "motivo": "Nenhum item encontrado no Excel"})
+                continue
+
+            fabricante_sessao = st.session_state.get("s5_fabricante_sugerido", "")
+            if tipo_detectado == "RECERTIFICACAO" and fabricante_sessao:
+                mask = df_arq["MARCA"].isna() | (df_arq["MARCA"].str.strip() == "")
+                df_arq.loc[mask, "MARCA"] = fabricante_sessao
+
+            fila.append({
+                "idx":       idx_arquivo,
+                "arquivo":   arquivo_s5,
+                "nome":      arquivo_s5.name,
+                "ip":        ip_extraido,
+                "tipo":      tipo_detectado,
+                "data":      data_extraida or "",
+                "fabrica":   fab_final,
+                "ce_bri":    ce_final,
+                "endereco":  end_final,
+                "df":        df_arq,
+                "duplicado": dup,
+                "auto_fab":  dados_fab_arq is not None,
+            })
+
+        if erros:
+            st.error(f"⛔ {len(erros)} arquivo(s) com problema — serão ignorados no salvamento:")
+            for err in erros:
+                st.caption(f"• **{err['arquivo']}** — {err['motivo']}")
+
+        if fila:
             st.divider()
+            st.markdown(f"### Revisão — {len(fila)} processo(s) prontos")
 
-            with st.expander(f"📄 {arquivo_s5.name}", expanded=True):
-                ip_extraido = extrair_ip_processo(arquivo_s5.name)
-                data_extraida = extrair_data_processo(arquivo_s5.name)
-                tipo_detectado = detectar_tipo_processo(arquivo_s5.name)
-                fabrica_detectada_nome = extrair_codigo_fabrica_nome(arquivo_s5.name)
-                dados_fabrica_arquivo = buscar_fabrica_por_codigo_s5(cliente_s5, fabrica_detectada_nome) if fabrica_detectada_nome else None
+            with st.expander("⚙️ Ajustes globais (aplicar a todos)", expanded=False):
+                col_g1, col_g2 = st.columns(2)
+                with col_g1:
+                    tipos_global = ["— manter individual —", "INCLUSAO", "MANUTENCAO", "RECERTIFICACAO", "INICIAL", "OUTROS"]
+                    tipo_global = st.selectbox("Forçar tipo para todos", tipos_global, key="s5_tipo_global")
+                with col_g2:
+                    data_global = st.text_input("Forçar data para todos (opcional)", placeholder="AAAA-MM-DD", key="s5_data_global")
 
-                if not ip_extraido:
-                    st.error(
-                        "Arquivo ignorado: o nome do arquivo precisa conter IP. "
-                        "Exemplo: INCLUSÃO 06-01-26 F01 IP-0094-26.xlsx"
-                    )
-                    continue
+            indices_selecionados = []
 
-                st.success(f"IP identificado: {ip_extraido}")
-                st.info(
-                    f"Tipo detectado: {tipo_detectado} | "
-                    f"Data detectada: {data_extraida or 'não encontrada'} | "
-                    f"Fábrica detectada no arquivo: {fabrica_detectada_nome or 'não encontrada'}"
+            for item in fila:
+                tem_dup = not item["duplicado"].empty
+                status_icon = "⚠️" if tem_dup else "✅"
+                label_exp = (
+                    f"{status_icon} {item['nome']} | "
+                    f"IP: {item['ip']} | "
+                    f"Tipo: {item['tipo']} | "
+                    f"Fábrica: {item['fabrica']} | "
+                    f"{len(item['df'])} itens"
                 )
 
-                fabrica_final_arquivo = fabrica_s5
-                ce_bri_final_arquivo = ce_bri_s5
-                endereco_final_arquivo = endereco_s5
+                with st.expander(label_exp, expanded=tem_dup):
+                    col_r1, col_r2, col_r3 = st.columns(3)
+                    col_r1.metric("IP", item["ip"])
+                    col_r2.metric("Itens", len(item["df"]))
+                    col_r3.metric("Fábrica", item["fabrica"])
 
-                if dados_fabrica_arquivo:
-                    st.success(
-                        f"Fábrica vinculada automaticamente pela base {cliente_s5}: "
-                        f"{dados_fabrica_arquivo.get('fabrica', '')} | {dados_fabrica_arquivo.get('ce_bri', '')}"
+                    if item["auto_fab"]:
+                        st.success("Fábrica vinculada automaticamente pelos Registros ✅")
+
+                    col_t1, col_t2 = st.columns(2)
+                    with col_t1:
+                        tipos = ["INCLUSAO", "MANUTENCAO", "RECERTIFICACAO", "INICIAL", "OUTROS"]
+                        tipo_arq = st.selectbox(
+                            "Tipo",
+                            tipos,
+                            index=tipos.index(item["tipo"]) if item["tipo"] in tipos else 0,
+                            key=f"s5_tipo_rev_{item['idx']}_{item['nome']}"
+                        )
+                        item["tipo"] = tipo_arq
+
+                    with col_t2:
+                        data_arq = st.text_input(
+                            "Data",
+                            value=item["data"],
+                            key=f"s5_data_rev_{item['idx']}_{item['nome']}"
+                        )
+                        item["data"] = data_arq
+
+                    if tem_dup:
+                        st.warning("⚠️ Já existe processo com este IP para esta fábrica:")
+                        st.dataframe(item["duplicado"], use_container_width=True)
+                        item["substituir"] = st.checkbox(
+                            "Substituir processo existente ao salvar",
+                            value=False,
+                            key=f"s5_sub_{item['idx']}_{item['nome']}"
+                        )
+                    else:
+                        item["substituir"] = False
+
+                    st.caption("Prévia (primeiros 10 itens):")
+                    st.dataframe(item["df"].head(10), use_container_width=True)
+                    if len(item["df"]) > 10:
+                        st.caption(f"... e mais {len(item['df']) - 10} item(ns)")
+
+                    incluir = st.checkbox(
+                        "Incluir este processo no salvamento",
+                        value=not tem_dup,
+                        key=f"s5_incluir_{item['idx']}_{item['nome']}"
                     )
+                    if incluir:
+                        indices_selecionados.append(item["idx"])
 
-                    usar_dados_auto_s5 = st.checkbox(
-                        "Usar CE-BRI e endereço encontrados automaticamente para este arquivo",
-                        value=True,
-                        key=f"s5_usar_dados_auto_arquivo_{idx_arquivo}_{arquivo_s5.name}"
-                    )
+            # Aplicar ajustes globais
+            for item in fila:
+                if tipo_global != "— manter individual —":
+                    item["tipo"] = tipo_global
+                if clean(data_global):
+                    item["data"] = data_global
 
-                    if usar_dados_auto_s5:
-                        fabrica_final_arquivo = dados_fabrica_arquivo.get("fabrica", fabrica_final_arquivo)
-                        ce_bri_final_arquivo = dados_fabrica_arquivo.get("ce_bri", ce_bri_final_arquivo)
-                        endereco_final_arquivo = dados_fabrica_arquivo.get("endereco_fabrica", endereco_final_arquivo)
+            st.divider()
+            fila_final = [i for i in fila if i["idx"] in indices_selecionados]
+            st.markdown(
+                f"**{len(fila_final)} processo(s) selecionado(s)** "
+                f"| {sum(len(i['df']) for i in fila_final)} itens no total"
+            )
 
-                elif fabrica_detectada_nome:
-                    st.warning(
-                        f"O arquivo indica {fabrica_detectada_nome}, mas não encontrei essa fábrica nos Registros da base {cliente_s5}."
-                    )
+            if not clean(cliente_s5):
+                st.error("⛔ Informe o cliente antes de salvar.")
+            elif not fila_final:
+                st.warning("Nenhum processo selecionado.")
+            else:
+                if st.button(
+                    f"💾 Salvar {len(fila_final)} processo(s) no Sistema 5",
+                    key="s5_salvar_todos",
+                    type="primary"
+                ):
+                    salvos   = 0
+                    falhos   = []
+                    progress = st.progress(0, text="Salvando...")
 
-                col_proc_1, col_proc_2 = st.columns(2)
-
-                tipos = ["INCLUSAO", "MANUTENCAO", "RECERTIFICACAO", "INICIAL", "OUTROS"]
-
-                with col_proc_1:
-                    tipo_s5 = st.selectbox(
-                        "Tipo de processo",
-                        tipos,
-                        index=tipos.index(tipo_detectado) if tipo_detectado in tipos else 0,
-                        key=f"s5_tipo_{idx_arquivo}_{arquivo_s5.name}"
-                    )
-
-                    data_s5 = st.text_input(
-                        "Data do processo",
-                        value=data_extraida or "",
-                        placeholder="AAAA-MM-DD",
-                        key=f"s5_data_{idx_arquivo}_{arquivo_s5.name}"
-                    )
-
-                with col_proc_2:
-                    st.text_input(
-                        "Fábrica que será usada neste arquivo",
-                        value=fabrica_final_arquivo,
-                        key=f"s5_fabrica_final_{idx_arquivo}_{arquivo_s5.name}",
-                        disabled=True
-                    )
-
-                    st.text_input(
-                        "CE-BRI que será usado neste arquivo",
-                        value=ce_bri_final_arquivo,
-                        key=f"s5_ce_bri_final_{idx_arquivo}_{arquivo_s5.name}",
-                        disabled=True
-                    )
-
-                duplicados_ip = ip_processo_ja_existe_sistema5(
-                    ip_extraido,
-                    cliente_s5,
-                    fabrica_final_arquivo
-                )
-
-                if not duplicados_ip.empty:
-                    st.warning("Já existe processo salvo com este IP para esta base/fábrica.")
-                    st.dataframe(duplicados_ip, use_container_width=True)
-
-                    substituir_ip = st.checkbox(
-                        "Substituir processo existente com este IP antes de salvar",
-                        value=False,
-                        key=f"s5_substituir_ip_{idx_arquivo}_{arquivo_s5.name}"
-                    )
-                else:
-                    substituir_ip = False
-
-                try:
-                    df_s5 = ler_excel_inclusao_sistema5(arquivo_s5)
-
-                    if df_s5.empty:
-                        st.warning("Nenhum item encontrado nesse Excel. Verifique se há coluna de MODELO / referência.")
-                        continue
-
-                    # RECERTIFICAÇÃO: preenche MARCA vazia com fabricante da fábrica
-                    fabricante_sessao = st.session_state.get("s5_fabricante_sugerido", "")
-                    if tipo_s5 == "RECERTIFICACAO" and fabricante_sessao:
-                        itens_sem_marca = df_s5["MARCA"].isna() | (df_s5["MARCA"].str.strip() == "")
-                        if itens_sem_marca.any():
-                            df_s5.loc[itens_sem_marca, "MARCA"] = fabricante_sessao
-                            st.info(
-                                f"🏭 **{itens_sem_marca.sum()} item(ns)** sem marca preenchidos automaticamente "
-                                f"com o fabricante **{fabricante_sessao}** (RECERTIFICAÇÃO)."
-                            )
-
-                    st.subheader("Prévia dos itens encontrados")
-                    st.dataframe(df_s5, use_container_width=True)
-
-                    if st.button(
-                        f"Salvar este processo: {arquivo_s5.name}",
-                        key=f"s5_salvar_processo_{idx_arquivo}_{arquivo_s5.name}"
-                    ):
-                        if not clean(cliente_s5) or not clean(fabrica_final_arquivo):
-                            st.error("Informe cliente e fábrica antes de salvar.")
-                        else:
-                            if substituir_ip and not duplicados_ip.empty:
-                                for _, proc_dup in duplicados_ip.iterrows():
+                    for i_prog, item in enumerate(fila_final):
+                        try:
+                            if item["substituir"] and not item["duplicado"].empty:
+                                for _, proc_dup in item["duplicado"].iterrows():
                                     deletar_processo_sistema5(proc_dup["arquivo_id"])
 
-                            total = salvar_inclusao_sistema5(
+                            total_itens = salvar_inclusao_sistema5(
                                 categoria_s5,
                                 cliente_s5,
-                                fabrica_final_arquivo,
-                                ce_bri_final_arquivo,
-                                endereco_final_arquivo,
-                                tipo_s5,
-                                ip_extraido,
-                                data_s5,
-                                arquivo_s5.name,
-                                df_s5
+                                item["fabrica"],
+                                item["ce_bri"],
+                                item["endereco"],
+                                item["tipo"],
+                                item["ip"],
+                                item["data"],
+                                item["nome"],
+                                item["df"]
                             )
+                            salvos += 1
+                            progress.progress(
+                                (i_prog + 1) / len(fila_final),
+                                text=f"Salvando {item['ip']}... ({i_prog+1}/{len(fila_final)})"
+                            )
+                        except Exception as e:
+                            falhos.append({"arquivo": item["nome"], "erro": str(e)})
 
-                            st.success(f"{total} itens salvos no Sistema 5 para o processo {ip_extraido} ✅")
-                            st.cache_data.clear()
+                    progress.empty()
+                    st.cache_data.clear()
 
-                except Exception as e:
-                    st.error(f"Erro ao ler Excel do Sistema 5: {e}")
+                    if salvos:
+                        st.success(f"✅ {salvos} processo(s) salvos com sucesso!")
+                    if falhos:
+                        st.error(f"⛔ {len(falhos)} processo(s) com erro:")
+                        for f in falhos:
+                            st.caption(f"• **{f['arquivo']}** — {f['erro']}")
+                    if salvos:
+                        st.rerun()
 
     st.divider()
     st.subheader("Estrutura salva no Sistema 5")
@@ -6024,4 +6067,3 @@ with aba9:
                     st.success(mensagem)
                 else:
                     st.error(mensagem)
-
