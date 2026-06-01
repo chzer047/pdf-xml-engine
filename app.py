@@ -5107,26 +5107,29 @@ with aba6:
             "Selecione uma fábrica",
             range(len(opcoes_fabrica_s5)),
             format_func=lambda i: opcoes_fabrica_s5[i],
-            key="s5_fabrica_existente_select"
+            key=f"s5_fabrica_existente_select_{cliente_s5}"
         )
 
+        # Garante que o índice nunca ultrapasse o tamanho da lista atual
+        idx_seguro = min(idx_escolhido_fab, len(fabricas_disponiveis_s5) - 1)
+
         # Pega os dados direto do DataFrame pelo índice — sem parse de string
-        linha_selecionada = fabricas_disponiveis_s5.iloc[idx_escolhido_fab]
+        linha_selecionada = fabricas_disponiveis_s5.iloc[idx_seguro]
         fabrica_padrao  = clean(linha_selecionada.get("fabrica", ""))
         ce_padrao       = clean(linha_selecionada.get("ce_bri", ""))
         endereco_padrao = clean(linha_selecionada.get("endereco_fabrica", ""))
 
         dados_fabrica_sugeridos = {
-            "fabrica":           fabrica_padrao,
-            "ce_bri":            ce_padrao,
-            "endereco_fabrica":  endereco_padrao,
+            "fabrica":          fabrica_padrao,
+            "ce_bri":           ce_padrao,
+            "endereco_fabrica": endereco_padrao,
         }
 
         st.success("Dados da fábrica carregados ✅")
 
     else:
-        fabrica_padrao = ""
-        ce_padrao = ""
+        fabrica_padrao  = ""
+        ce_padrao       = ""
         endereco_padrao = ""
 
     col_f1, col_f2 = st.columns(2)
@@ -5136,14 +5139,14 @@ with aba6:
             "Fábrica",
             value=fabrica_padrao,
             placeholder="Ex: F01, F02, FÁBRICA 01...",
-            key="s5_fabrica"
+            key=f"s5_fabrica_{cliente_s5}"
         )
 
         ce_bri_s5 = st.text_input(
             "CE-BRI da fábrica",
             value=ce_padrao,
             placeholder="Ex: CE-BRI-INNAC-02484-01A",
-            key="s5_ce_bri"
+            key=f"s5_ce_bri_{cliente_s5}"
         )
 
     with col_f2:
@@ -5152,7 +5155,7 @@ with aba6:
             value="" if pd.isna(endereco_padrao) else str(endereco_padrao),
             placeholder="Cole aqui o endereço completo da fábrica",
             height=120,
-            key="s5_endereco"
+            key=f"s5_endereco_{cliente_s5}"
         )
 
     # Fabricante automático — mostra se a fábrica selecionada tem histórico
