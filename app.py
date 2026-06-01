@@ -5358,86 +5358,96 @@ with aba6:
         categorias = processos_s5["categoria"].dropna().unique().tolist()
 
         for categoria in categorias:
-            with st.expander(f"📁 {categoria}", expanded=False):
+            with st.expander(f"📁 {categoria}", expanded=True):
                 bloco_categoria = processos_s5[processos_s5["categoria"] == categoria]
                 clientes = bloco_categoria["cliente_base"].dropna().unique().tolist()
 
                 for cliente in clientes:
-                    st.markdown(f"### 📁 {cliente}")
                     bloco_cliente = bloco_categoria[bloco_categoria["cliente_base"] == cliente]
-                    fabricas = bloco_cliente["fabrica"].dropna().unique().tolist()
+                    total_proc_cliente = len(bloco_cliente)
+                    total_itens_cliente = int(bloco_cliente["qtd_itens"].fillna(0).sum())
+                    fabricas_cliente = bloco_cliente["fabrica"].dropna().unique().tolist()
 
-                    for fabrica in fabricas:
-                        with st.expander(f"🏭 {fabrica}", expanded=False):
+                    with st.expander(
+                        f"👤 {cliente} — {len(fabricas_cliente)} fábrica(s) | {total_proc_cliente} processo(s) | {total_itens_cliente} itens",
+                        expanded=False
+                    ):
+                        for fabrica in fabricas_cliente:
                             bloco_fabrica = bloco_cliente[bloco_cliente["fabrica"] == fabrica]
+                            total_proc_fab = len(bloco_fabrica)
+                            total_itens_fab = int(bloco_fabrica["qtd_itens"].fillna(0).sum())
 
-                            st.caption("Processos salvos nesta fábrica")
+                            with st.expander(
+                                f"🏭 {fabrica} — {total_proc_fab} processo(s) | {total_itens_fab} itens",
+                                expanded=False
+                            ):
+                                st.caption("Processos salvos nesta fábrica")
 
-                            for _, proc in bloco_fabrica.iterrows():
-                                arquivo_id = int(proc["arquivo_id"])
-                                titulo_processo = (
-                                    f"📄 {proc.get('tipo_processo', '')} | "
-                                    f"{proc.get('ip_processo', '')} | "
-                                    f"{proc.get('data_processo', '')} | "
-                                    f"{proc.get('arquivo_nome', '')} | "
-                                    f"{int(proc.get('qtd_itens', 0) or 0)} itens"
-                                )
-
-                                with st.expander(titulo_processo, expanded=False):
-                                    colp1, colp2, colp3 = st.columns(3)
-
-                                    colp1.metric("IP", proc.get("ip_processo", ""))
-                                    colp2.metric("Tipo", proc.get("tipo_processo", ""))
-                                    colp3.metric("Itens", int(proc.get("qtd_itens", 0) or 0))
-
-                                    st.caption(f"CE-BRI: {proc.get('ce_bri', '')}")
-                                    st.caption(f"Endereço: {proc.get('endereco_fabrica', '')}")
-
-                                    termo_item_processo = st.text_input(
-                                        "Pesquisar item dentro deste processo",
-                                        placeholder="Digite modelo, marca, descrição ou código",
-                                        key=f"pesquisar_item_processo_{arquivo_id}"
+                                for _, proc in bloco_fabrica.iterrows():
+                                    arquivo_id = int(proc["arquivo_id"])
+                                    titulo_processo = (
+                                        f"📄 {proc.get('tipo_processo', '')} | "
+                                        f"{proc.get('ip_processo', '')} | "
+                                        f"{proc.get('data_processo', '')} | "
+                                        f"{proc.get('arquivo_nome', '')} | "
+                                        f"{int(proc.get('qtd_itens', 0) or 0)} itens"
                                     )
 
-                                    itens_do_processo = buscar_itens_processo_sistema5(
-                                        arquivo_id,
-                                        termo_item_processo
-                                    )
+                                    with st.expander(titulo_processo, expanded=False):
+                                        colp1, colp2, colp3 = st.columns(3)
 
-                                    if itens_do_processo.empty:
-                                        st.warning("Nenhum item encontrado dentro deste processo.")
-                                    else:
-                                        st.success(f"{len(itens_do_processo)} item(ns) encontrado(s) neste processo ✅")
-                                        st.dataframe(itens_do_processo, use_container_width=True)
+                                        colp1.metric("IP", proc.get("ip_processo", ""))
+                                        colp2.metric("Tipo", proc.get("tipo_processo", ""))
+                                        colp3.metric("Itens", int(proc.get("qtd_itens", 0) or 0))
 
-                                        st.download_button(
-                                            "Baixar itens deste processo CSV",
-                                            itens_do_processo.to_csv(index=False, sep=";").encode(
-                                                "ISO-8859-1",
-                                                errors="replace"
-                                            ),
-                                            f"sistema5_processo_{arquivo_id}.csv",
-                                            "text/csv",
-                                            key=f"download_itens_processo_{arquivo_id}"
+                                        st.caption(f"CE-BRI: {proc.get('ce_bri', '')}")
+                                        st.caption(f"Endereço: {proc.get('endereco_fabrica', '')}")
+
+                                        termo_item_processo = st.text_input(
+                                            "Pesquisar item dentro deste processo",
+                                            placeholder="Digite modelo, marca, descrição ou código",
+                                            key=f"pesquisar_item_processo_{arquivo_id}"
                                         )
 
-                                    st.divider()
-                                    st.caption("🗑️ Remover este processo")
-                                    confirmar_del_proc = st.checkbox(
-                                        f"Confirmo que quero remover permanentemente este processo e seus {int(proc.get('qtd_itens', 0) or 0)} itens",
-                                        key=f"confirmar_del_proc_{arquivo_id}"
-                                    )
-                                    if confirmar_del_proc:
-                                        if st.button(
-                                            "🗑️ Deletar processo",
-                                            key=f"btn_del_proc_{arquivo_id}"
-                                        ):
-                                            try:
-                                                qtd_del = deletar_processo_sistema5(arquivo_id)
-                                                st.success(f"Processo {proc.get('ip_processo', '')} removido. {qtd_del} itens deletados ✅")
-                                                st.rerun()
-                                            except Exception as e:
-                                                st.error(f"Erro ao deletar: {e}")
+                                        itens_do_processo = buscar_itens_processo_sistema5(
+                                            arquivo_id,
+                                            termo_item_processo
+                                        )
+
+                                        if itens_do_processo.empty:
+                                            st.warning("Nenhum item encontrado dentro deste processo.")
+                                        else:
+                                            st.success(f"{len(itens_do_processo)} item(ns) encontrado(s) neste processo ✅")
+                                            st.dataframe(itens_do_processo, use_container_width=True)
+
+                                            st.download_button(
+                                                "Baixar itens deste processo CSV",
+                                                itens_do_processo.to_csv(index=False, sep=";").encode(
+                                                    "ISO-8859-1",
+                                                    errors="replace"
+                                                ),
+                                                f"sistema5_processo_{arquivo_id}.csv",
+                                                "text/csv",
+                                                key=f"download_itens_processo_{arquivo_id}"
+                                            )
+
+                                        st.divider()
+                                        st.caption("🗑️ Remover este processo")
+                                        confirmar_del_proc = st.checkbox(
+                                            f"Confirmo que quero remover permanentemente este processo e seus {int(proc.get('qtd_itens', 0) or 0)} itens",
+                                            key=f"confirmar_del_proc_{arquivo_id}"
+                                        )
+                                        if confirmar_del_proc:
+                                            if st.button(
+                                                "🗑️ Deletar processo",
+                                                key=f"btn_del_proc_{arquivo_id}"
+                                            ):
+                                                try:
+                                                    qtd_del = deletar_processo_sistema5(arquivo_id)
+                                                    st.success(f"Processo {proc.get('ip_processo', '')} removido. {qtd_del} itens deletados ✅")
+                                                    st.rerun()
+                                                except Exception as e:
+                                                    st.error(f"Erro ao deletar: {e}")
 
         st.download_button(
             "Baixar resumo Sistema 5 CSV",
