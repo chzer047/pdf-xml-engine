@@ -4450,9 +4450,15 @@ with aba3:
 
     cliente_base = st.text_input(
         "Nome da Base / Cliente",
-        value="BOLSA",
+        value="",
+        placeholder="Ex: BOLSA, MOHNISH, EMPRESA XYZ...",
         key="cliente_base_registros"
     )
+
+    if not clean(cliente_base):
+        st.warning("⚠️ Informe o nome da base/cliente antes de enviar o Excel.")
+    else:
+        st.info(f"Os registros serão salvos para a base: **{cliente_base.upper()}**")
 
     with st.expander("ℹ️ Como funciona esta aba"):
         st.markdown("""
@@ -4465,8 +4471,13 @@ with aba3:
     registro_excel = st.file_uploader(
         "Envie o Excel de Registros",
         type=["xlsx", "xls"],
-        key="excel_registros"
+        key="excel_registros",
+        disabled=not bool(clean(cliente_base))
     )
+
+    if not clean(cliente_base) and registro_excel:
+        st.error("Informe o nome da base antes de processar o Excel.")
+        registro_excel = None
 
     if registro_excel:
         try:
@@ -5927,4 +5938,3 @@ with aba9:
                     st.success(mensagem)
                 else:
                     st.error(mensagem)
-
