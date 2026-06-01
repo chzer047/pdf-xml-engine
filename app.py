@@ -5131,6 +5131,10 @@ with aba6:
         fabrica_padrao  = ""
         ce_padrao       = ""
         endereco_padrao = ""
+        idx_seguro      = 0
+
+    # key inclui cliente + índice da fábrica → sempre reseta ao trocar qualquer um dos dois
+    _key_fab = f"{cliente_s5}_{idx_seguro}"
 
     col_f1, col_f2 = st.columns(2)
 
@@ -5139,14 +5143,14 @@ with aba6:
             "Fábrica",
             value=fabrica_padrao,
             placeholder="Ex: F01, F02, FÁBRICA 01...",
-            key=f"s5_fabrica_{cliente_s5}"
+            key=f"s5_fabrica_{_key_fab}"
         )
 
         ce_bri_s5 = st.text_input(
             "CE-BRI da fábrica",
             value=ce_padrao,
             placeholder="Ex: CE-BRI-INNAC-02484-01A",
-            key=f"s5_ce_bri_{cliente_s5}"
+            key=f"s5_ce_bri_{_key_fab}"
         )
 
     with col_f2:
@@ -5155,7 +5159,7 @@ with aba6:
             value="" if pd.isna(endereco_padrao) else str(endereco_padrao),
             placeholder="Cole aqui o endereço completo da fábrica",
             height=120,
-            key=f"s5_endereco_{cliente_s5}"
+            key=f"s5_endereco_{_key_fab}"
         )
 
     # Fabricante automático — mostra se a fábrica selecionada tem histórico
@@ -5982,4 +5986,3 @@ with aba9:
                     st.success(mensagem)
                 else:
                     st.error(mensagem)
-
