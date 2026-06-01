@@ -4762,10 +4762,55 @@ with aba3:
 
                 st.success(f"Endereço atualizado em {total_alterado} registros da fábrica {fabrica_editar} ✅")
 
+    st.divider()
 
-# ==========================================
-# ABA 4 - PREENCHIMENTO DE CONFIRMAÇÃO
-# ==========================================
+    st.subheader("🗑️ Excluir registros de um cliente")
+    st.caption("Remove permanentemente todos os registros de uma base/cliente do banco. Não afeta certificados nem Sistema 5.")
+
+    bases_para_excluir = pd.read_sql_query("""
+    SELECT DISTINCT cliente_base,
+        COUNT(*) AS total_registros,
+        COUNT(DISTINCT fabrica) AS total_fabricas
+    FROM registros
+    WHERE cliente_base IS NOT NULL AND cliente_base != ''
+    GROUP BY cliente_base
+    ORDER BY cliente_base
+    """, conn)
+
+    if bases_para_excluir.empty:
+        st.info("Nenhuma base cadastrada para excluir.")
+    else:
+        base_excluir = st.selectbox(
+            "Selecione o cliente para excluir",
+            bases_para_excluir["cliente_base"].tolist(),
+            key="excluir_registro_base"
+        )
+
+        linha_excluir = bases_para_excluir[bases_para_excluir["cliente_base"] == base_excluir].iloc[0]
+
+        st.error(
+            f"**{base_excluir}** — "
+            f"{int(linha_excluir['total_registros'])} registro(s) em "
+            f"{int(linha_excluir['total_fabricas'])} fábrica(s)"
+        )
+
+        confirmar_excluir_base = st.checkbox(
+            f"Confirmo que quero excluir permanentemente todos os registros de {base_excluir}",
+            key="confirmar_excluir_base"
+        )
+
+        if confirmar_excluir_base:
+            if st.button("🗑️ Excluir registros deste cliente", key="btn_excluir_base"):
+                try:
+                    cursor.execute(
+                        "DELETE FROM registros WHERE UPPER(cliente_base) = UPPER(?)",
+                        (base_excluir,)
+                    )
+                    conn.commit()
+                    st.success(f"Todos os registros de **{base_excluir}** foram excluídos ✅")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao excluir: {e}")
 
 with aba4:
     st.title("Preenchimento de Confirmação")
@@ -5925,4 +5970,3 @@ with aba9:
                     st.success(mensagem)
                 else:
                     st.error(mensagem)
-
