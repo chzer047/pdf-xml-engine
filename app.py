@@ -2482,6 +2482,130 @@ def ler_excel_inclusao_sistema5(uploaded_file):
     return df_final
 
 
+def listar_clientes_sistema5_banco(categoria=""):
+    """
+    Retorna clientes já salvos na tabela sistema5_clientes.
+    Usado para popular dropdown em SISTEMA 5 PROPRIOS.
+    """
+    categoria = normalizar_categoria_sistema5(categoria) if categoria else ""
+
+    if categoria:
+        return pd.read_sql_query("""
+        SELECT DISTINCT cliente_base
+        FROM sistema5_clientes
+        WHERE categoria = ?
+        AND cliente_base IS NOT NULL AND cliente_base != ''
+        ORDER BY cliente_base
+        """, conn, params=(categoria,))
+
+    return pd.read_sql_query("""
+    SELECT DISTINCT cliente_base
+    FROM sistema5_clientes
+    WHERE cliente_base IS NOT NULL AND cliente_base != ''
+    ORDER BY cliente_base
+    """, conn)
+
+
+def listar_fabricas_sistema5_banco(cliente_base="", categoria=""):
+    """
+    Retorna fabricas de duas fontes: sistema5_fabricas + registros.
+    Unifica para o selectbox de fabrica.
+    """
+    cliente_base = clean(cliente_base).upper()
+    categoria = normalizar_categoria_sistema5(categoria) if categoria else ""
+
+    params_s5 = []
+    where_s5_parts = []
+    if cliente_base:
+        where_s5_parts.append("UPPER(c.cliente_base) = UPPER(?)")
+        params_s5.append(cliente_base)
+    if categoria:
+        where_s5_parts.append("c.categoria = ?")
+        params_s5.append(categoria)
+    where_s5 = ("WHERE " + " AND ".join(where_s5_parts)) if where_s5_parts else ""
+
+    df_s5 = pd.read_sql_query(f"""
+    SELECT DISTINCT
+        f.fabrica,
+        f.ce_bri,
+        f.endereco_fabrica,
+        'Sistema 5' AS origem
+    FROM sistema5_fabricas f
+    INNER JOIN sistema5_clientes c ON c.id = f.cliente_id
+    {where_s5}
+    AND f.fabrica IS NOT NULL AND f.fabrica != ''
+    ORDER BY f.fabrica
+    """, conn, params=tuple(params_s5))
+
+    params_reg = [cliente_base] if cliente_base else []
+    where_reg = "WHERE UPPER(cliente_base) = UPPER(?)" if cliente_base else "WHERE 1=1"
+
+    df_reg = pd.read_sql_query(f"""
+    SELECT DISTINCT
+        fabrica,
+        ce_bri,
+        endereco_fabrica,
+        'Registros' AS origem
+    FROM registros
+    {where_reg}
+    AND fabrica IS NOT NULL AND fabrica != ''
+    ORDER BY fabrica
+    """, conn, params=tuple(params_reg))
+
+    combinado = pd.concat([df_reg, df_s5], ignore_index=True)
+    combinado = combinado.drop_duplicates(subset=["fabrica"], keep="first")
+    return combinado.sort_values("fabrica").reset_index(drop=True)
+
+
+def buscar_fabricante_por_fabrica_s5(cliente_base, fabrica, ce_bri=""):
+    """
+    Para RECERTIFICACAO: busca a marca mais frequente nos itens
+    ja salvos para esta fabrica (certificados ou sistema5_itens).
+    """
+    cliente_base = clean(cliente_base).upper()
+    fabrica = clean(fabrica).upper()
+    ce_bri = clean(ce_bri).upper()
+
+    if ce_bri:
+        resultado = pd.read_sql_query("""
+        SELECT marca, COUNT(*) AS freq
+        FROM itens
+        WHERE certificado_id IN (
+            SELECT id FROM certificados WHERE UPPER(ce_bri) = UPPER(?)
+        )
+        AND marca IS NOT NULL AND marca != ''
+        GROUP BY UPPER(marca)
+        ORDER BY freq DESC
+        LIMIT 1
+        """, conn, params=(ce_bri,))
+        if not resultado.empty:
+            return clean(resultado.iloc[0]["marca"])
+
+    params = []
+    where_parts = []
+    if cliente_base:
+        where_parts.append("UPPER(cliente_base) = UPPER(?)")
+        params.append(cliente_base)
+    if fabrica:
+        where_parts.append("UPPER(fabrica) = UPPER(?)")
+        params.append(fabrica)
+
+    if not where_parts:
+        return ""
+
+    resultado = pd.read_sql_query(f"""
+    SELECT marca, COUNT(*) AS freq
+    FROM sistema5_itens
+    WHERE {" AND ".join(where_parts)}
+    AND marca IS NOT NULL AND marca != ''
+    GROUP BY UPPER(marca)
+    ORDER BY freq DESC
+    LIMIT 1
+    """, conn, params=tuple(params))
+
+    return clean(resultado.iloc[0]["marca"]) if not resultado.empty else ""
+
+
 def ip_processo_ja_existe_sistema5(ip_processo, cliente_base="", fabrica=""):
     """
     Retorna os processos já salvos com o mesmo IP.
@@ -4868,55 +4992,95 @@ with aba6:
         key="s5_categoria"
     )
 
-    cliente_s5 = st.text_input(
-        "Cliente / Solicitante",
-        value="BOLSA" if categoria_s5 == "SISTEMA 5 NOVO PROJETO" else "",
-        key="s5_cliente"
-    )
+    # --- Seleção de cliente ---
+    if categoria_s5 == "SISTEMA 5 NOVO PROJETO":
+        cliente_s5 = st.text_input(
+            "Cliente / Solicitante",
+            value="BOLSA",
+            key="s5_cliente_np"
+        )
+    else:
+        # SISTEMA 5 PROPRIOS — usa dropdown com clientes já cadastrados + opção de novo
+        clientes_proprios_banco = listar_clientes_sistema5_banco(categoria_s5)
+        opcoes_clientes_proprios = clientes_proprios_banco["cliente_base"].tolist() if not clientes_proprios_banco.empty else []
+        opcoes_clientes_proprios = ["➕ Novo cliente..."] + opcoes_clientes_proprios
+
+        escolha_cliente_proprios = st.selectbox(
+            "Cliente",
+            opcoes_clientes_proprios,
+            key="s5_cliente_proprios_select"
+        )
+
+        if escolha_cliente_proprios == "➕ Novo cliente...":
+            cliente_s5 = st.text_input(
+                "Nome do novo cliente",
+                placeholder="Ex: EMPRESA XYZ",
+                key="s5_cliente_proprios_novo"
+            ).upper()
+            if cliente_s5:
+                st.info(f"Novo cliente: **{cliente_s5}** — será criado ao salvar o primeiro processo.")
+        else:
+            cliente_s5 = escolha_cliente_proprios
+            st.success(f"Cliente selecionado: **{cliente_s5}**")
 
     st.subheader("Fábrica")
 
-    fabricas_existentes_s5 = listar_fabricas_existentes_para_sistema5(cliente_s5)
+    # Busca fábricas das duas fontes: registros + sistema5_fabricas
+    fabricas_disponiveis_s5 = listar_fabricas_sistema5_banco(cliente_s5, categoria_s5)
 
     usar_fabrica_existente = False
 
-    if not fabricas_existentes_s5.empty:
+    if not fabricas_disponiveis_s5.empty:
         usar_fabrica_existente = st.checkbox(
-            "Usar fábrica já cadastrada nos Registros",
+            "Usar fábrica já cadastrada",
             value=True,
             key="s5_usar_fabrica_existente"
         )
 
     dados_fabrica_sugeridos = None
 
-    if usar_fabrica_existente and not fabricas_existentes_s5.empty:
+    if usar_fabrica_existente and not fabricas_disponiveis_s5.empty:
         opcoes_fabrica_s5 = []
 
-        for _, linha_fab in fabricas_existentes_s5.iterrows():
+        for _, linha_fab in fabricas_disponiveis_s5.iterrows():
             fab = clean(linha_fab.get("fabrica", ""))
             ce = clean(linha_fab.get("ce_bri", ""))
-            opcoes_fabrica_s5.append(f"{fab} | {ce}")
+            origem = clean(linha_fab.get("origem", ""))
+            opcoes_fabrica_s5.append(f"{fab} | {ce} ({origem})")
 
         escolha_fabrica_s5 = st.selectbox(
-            "Selecione uma fábrica já cadastrada",
+            "Selecione uma fábrica",
             opcoes_fabrica_s5,
             key="s5_fabrica_existente_select"
         )
 
         fabrica_escolhida = escolha_fabrica_s5.split("|")[0].strip()
-        ce_escolhido = escolha_fabrica_s5.split("|")[1].strip() if "|" in escolha_fabrica_s5 else ""
+        ce_escolhido = escolha_fabrica_s5.split("|")[1].split("(")[0].strip() if "|" in escolha_fabrica_s5 else ""
 
+        # Tenta puxar de registros primeiro, depois sistema5_fabricas
         dados_fabrica_sugeridos = buscar_dados_fabrica_existente(
             cliente_s5,
             fabrica_escolhida,
             ce_escolhido
         )
 
+        if not dados_fabrica_sugeridos:
+            # Fallback: busca direto em sistema5_fabricas
+            row_s5_fab = pd.read_sql_query("""
+            SELECT f.fabrica, f.ce_bri, f.endereco_fabrica
+            FROM sistema5_fabricas f
+            INNER JOIN sistema5_clientes c ON c.id = f.cliente_id
+            WHERE UPPER(f.fabrica) = UPPER(?)
+            ORDER BY f.id DESC LIMIT 1
+            """, conn, params=(fabrica_escolhida,))
+            if not row_s5_fab.empty:
+                dados_fabrica_sugeridos = row_s5_fab.iloc[0].to_dict()
+
         fabrica_padrao = dados_fabrica_sugeridos.get("fabrica", fabrica_escolhida) if dados_fabrica_sugeridos else fabrica_escolhida
         ce_padrao = dados_fabrica_sugeridos.get("ce_bri", ce_escolhido) if dados_fabrica_sugeridos else ce_escolhido
         endereco_padrao = dados_fabrica_sugeridos.get("endereco_fabrica", "") if dados_fabrica_sugeridos else ""
 
-        st.success("Dados da fábrica puxados dos Registros ✅")
+        st.success("Dados da fábrica carregados ✅")
 
     else:
         fabrica_padrao = ""
@@ -4949,6 +5113,16 @@ with aba6:
             key="s5_endereco"
         )
 
+    # Fabricante automático — mostra se a fábrica selecionada tem histórico
+    if clean(fabrica_s5):
+        fabricante_sugerido = buscar_fabricante_por_fabrica_s5(cliente_s5, fabrica_s5, ce_bri_s5)
+        if fabricante_sugerido:
+            st.info(f"🏭 Fabricante identificado para esta fábrica: **{fabricante_sugerido}** "
+                    f"— será usado automaticamente em processos de RECERTIFICAÇÃO se o Excel não informar a marca.")
+            st.session_state["s5_fabricante_sugerido"] = fabricante_sugerido
+        else:
+            st.session_state["s5_fabricante_sugerido"] = ""
+
     if clean(ce_bri_s5) and not clean(endereco_s5):
         dados_por_ce = buscar_dados_fabrica_existente(
             cliente_s5,
@@ -4967,7 +5141,7 @@ with aba6:
         "Envie um ou mais Excels com IP no nome",
         type=["xlsx", "xls"],
         accept_multiple_files=True,
-        key="s5_excel_multi_v2"
+        key="s5_excel_multi"
     )
 
     if arquivos_s5:
@@ -5004,14 +5178,6 @@ with aba6:
                 ce_bri_final_arquivo = ce_bri_s5
                 endereco_final_arquivo = endereco_s5
 
-                # REGRA CORRETA:
-                # "Fabricante" aqui significa fábrica/fabricante do processo.
-                # Se nada foi selecionado manualmente, usa a fábrica detectada pelo Fxx do arquivo.
-                if dados_fabrica_arquivo and not clean(fabrica_final_arquivo):
-                    fabrica_final_arquivo = dados_fabrica_arquivo.get("fabrica", "")
-                    ce_bri_final_arquivo = dados_fabrica_arquivo.get("ce_bri", "")
-                    endereco_final_arquivo = dados_fabrica_arquivo.get("endereco_fabrica", "")
-
                 if dados_fabrica_arquivo:
                     st.success(
                         f"Fábrica vinculada automaticamente pela base {cliente_s5}: "
@@ -5019,8 +5185,8 @@ with aba6:
                     )
 
                     usar_dados_auto_s5 = st.checkbox(
-                        "Usar a fábrica/fabricante detectada no nome deste arquivo",
-                        value=False if clean(fabrica_s5) else True,
+                        "Usar CE-BRI e endereço encontrados automaticamente para este arquivo",
+                        value=True,
                         key=f"s5_usar_dados_auto_arquivo_{idx_arquivo}_{arquivo_s5.name}"
                     )
 
@@ -5093,6 +5259,17 @@ with aba6:
                         st.warning("Nenhum item encontrado nesse Excel. Verifique se há coluna de MODELO / referência.")
                         continue
 
+                    # RECERTIFICAÇÃO: preenche MARCA vazia com fabricante da fábrica
+                    fabricante_sessao = st.session_state.get("s5_fabricante_sugerido", "")
+                    if tipo_s5 == "RECERTIFICACAO" and fabricante_sessao:
+                        itens_sem_marca = df_s5["MARCA"].isna() | (df_s5["MARCA"].str.strip() == "")
+                        if itens_sem_marca.any():
+                            df_s5.loc[itens_sem_marca, "MARCA"] = fabricante_sessao
+                            st.info(
+                                f"🏭 **{itens_sem_marca.sum()} item(ns)** sem marca preenchidos automaticamente "
+                                f"com o fabricante **{fabricante_sessao}** (RECERTIFICAÇÃO)."
+                            )
+
                     st.subheader("Prévia dos itens encontrados")
                     st.dataframe(df_s5, use_container_width=True)
 
@@ -5101,7 +5278,7 @@ with aba6:
                         key=f"s5_salvar_processo_{idx_arquivo}_{arquivo_s5.name}"
                     ):
                         if not clean(cliente_s5) or not clean(fabrica_final_arquivo):
-                            st.error("Informe cliente e fábrica/fabricante antes de salvar. Se o arquivo tiver F01/F02 no nome, selecione a opção para usar a fábrica detectada.")
+                            st.error("Informe cliente e fábrica antes de salvar.")
                         else:
                             if substituir_ip and not duplicados_ip.empty:
                                 for _, proc_dup in duplicados_ip.iterrows():
