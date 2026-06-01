@@ -3717,17 +3717,13 @@ try:
     st.sidebar.header("Backup Geral")
     st.sidebar.caption("Backup centralizado: baixar e restaurar tudo pelo mesmo local.")
 
-    if st.sidebar.button("⬇️ GERAR E BAIXAR BACKUP ZIP", key="gerar_backup_btn"):
-        st.session_state["backup_zip_cache"] = gerar_backup_geral_zip()
-
-    if "backup_zip_cache" in st.session_state and st.session_state["backup_zip_cache"]:
-        st.sidebar.download_button(
-            "💾 Clique aqui para baixar o backup",
-            st.session_state["backup_zip_cache"],
-            "backup_geral_c_xml_br_engine.zip",
-            "application/zip",
-            key="backup_geral_sidebar"
-        )
+    st.sidebar.download_button(
+        "⬇️ GERAR E BAIXAR BACKUP ZIP",
+        gerar_backup_geral_zip(),
+        "backup_geral_c_xml_br_engine.zip",
+        "application/zip",
+        key="backup_geral_sidebar"
+    )
 
     st.sidebar.divider()
     st.sidebar.subheader("Restaurar backup")
@@ -6150,4 +6146,3 @@ with aba9:
                     st.success(mensagem)
                 else:
                     st.error(mensagem)
-
