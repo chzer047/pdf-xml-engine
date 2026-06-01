@@ -5555,6 +5555,33 @@ with aba6:
                                                 except Exception as e:
                                                     st.error(f"Erro ao deletar: {e}")
 
+                                # --- Excluir todos os processos desta fábrica ---
+                                st.divider()
+                                _key_fab_del = f"{cliente}_{fabrica}".replace(" ", "_")
+                                st.caption("🗑️ Excluir todos os processos desta fábrica")
+                                confirmar_del_fab = st.checkbox(
+                                    f"Confirmo que quero excluir todos os {total_proc_fab} processo(s) e {total_itens_fab} itens de {fabrica}",
+                                    key=f"confirmar_del_fab_{_key_fab_del}"
+                                )
+                                if confirmar_del_fab:
+                                    if st.button(
+                                        f"🗑️ Excluir todos os processos de {fabrica}",
+                                        key=f"btn_del_fab_{_key_fab_del}"
+                                    ):
+                                        try:
+                                            ids_fab = bloco_fabrica["arquivo_id"].tolist()
+                                            total_del_itens = 0
+                                            for aid in ids_fab:
+                                                total_del_itens += deletar_processo_sistema5(int(aid))
+                                            st.success(
+                                                f"✅ {len(ids_fab)} processo(s) e {total_del_itens} itens de "
+                                                f"**{fabrica}** excluídos com sucesso."
+                                            )
+                                            st.cache_data.clear()
+                                            st.rerun()
+                                        except Exception as e:
+                                            st.error(f"Erro ao excluir: {e}")
+
         st.download_button(
             "Baixar resumo Sistema 5 CSV",
             processos_s5.to_csv(index=False, sep=";").encode("ISO-8859-1", errors="replace"),
