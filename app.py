@@ -5004,6 +5004,14 @@ with aba6:
                 ce_bri_final_arquivo = ce_bri_s5
                 endereco_final_arquivo = endereco_s5
 
+                # REGRA CORRETA:
+                # "Fabricante" aqui significa fábrica/fabricante do processo.
+                # Se nada foi selecionado manualmente, usa a fábrica detectada pelo Fxx do arquivo.
+                if dados_fabrica_arquivo and not clean(fabrica_final_arquivo):
+                    fabrica_final_arquivo = dados_fabrica_arquivo.get("fabrica", "")
+                    ce_bri_final_arquivo = dados_fabrica_arquivo.get("ce_bri", "")
+                    endereco_final_arquivo = dados_fabrica_arquivo.get("endereco_fabrica", "")
+
                 if dados_fabrica_arquivo:
                     st.success(
                         f"Fábrica vinculada automaticamente pela base {cliente_s5}: "
@@ -5011,8 +5019,8 @@ with aba6:
                     )
 
                     usar_dados_auto_s5 = st.checkbox(
-                        "Usar CE-BRI e endereço encontrados automaticamente para este arquivo",
-                        value=True,
+                        "Usar a fábrica/fabricante detectada no nome deste arquivo",
+                        value=False if clean(fabrica_s5) else True,
                         key=f"s5_usar_dados_auto_arquivo_{idx_arquivo}_{arquivo_s5.name}"
                     )
 
@@ -5093,7 +5101,7 @@ with aba6:
                         key=f"s5_salvar_processo_{idx_arquivo}_{arquivo_s5.name}"
                     ):
                         if not clean(cliente_s5) or not clean(fabrica_final_arquivo):
-                            st.error("Informe cliente e fábrica antes de salvar.")
+                            st.error("Informe cliente e fábrica/fabricante antes de salvar. Se o arquivo tiver F01/F02 no nome, selecione a opção para usar a fábrica detectada.")
                         else:
                             if substituir_ip and not duplicados_ip.empty:
                                 for _, proc_dup in duplicados_ip.iterrows():
