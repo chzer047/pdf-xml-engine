@@ -3741,10 +3741,17 @@ try:
             key="confirmar_restore_sidebar"
         )
         if confirmar_sidebar:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
             with open(DB_PATH, "wb") as f:
                 f.write(backup_geral_upload.read())
-            st.sidebar.success("Backup restaurado com sucesso.")
-            st.sidebar.warning("Recarregue o app para aplicar o banco restaurado.")
+
+            st.cache_data.clear()
+            st.sidebar.success("Backup restaurado! Recarregando...")
+            st.rerun()
 
 except Exception as e:
     st.sidebar.warning(f"Backup geral indisponível: {e}")
@@ -6146,3 +6153,4 @@ with aba9:
                     st.success(mensagem)
                 else:
                     st.error(mensagem)
+
