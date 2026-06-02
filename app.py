@@ -2357,6 +2357,7 @@ def ler_excel_inclusao_sistema5(uploaded_file):
     - Ignora abas DESCONSIDERADO/DESCONSIDERADA.
     - Preserva códigos de barras que começam com 0 usando o number_format do Excel.
     - Corrige casos em que MARCA e CÓDIGO vêm invertidos.
+    - Ignora imagens corrompidas (.mpo e outros formatos não suportados).
     """
 
     try:
@@ -2365,9 +2366,34 @@ def ler_excel_inclusao_sistema5(uploaded_file):
         pass
 
     try:
+        # keep_vba=False e rich_text=False reduzem chance de erro em arquivos complexos
         wb = load_workbook(uploaded_file, data_only=True)
-    except Exception:
-        return pd.DataFrame()
+    except Exception as e:
+        erro_str = str(e).lower()
+        # Tenta segunda vez ignorando conteúdo de imagem corrompido
+        if "mpo" in erro_str or "image" in erro_str or "picture" in erro_str or "drawing" in erro_str:
+            try:
+                uploaded_file.seek(0)
+                # Carrega sem validação de imagens via zipfile manual
+                import zipfile, shutil, os
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    zip_path = os.path.join(tmpdir, "original.xlsx")
+                    with open(zip_path, "wb") as f:
+                        f.write(uploaded_file.read())
+                    # Remove arquivos de imagem problemáticos do zip
+                    clean_path = os.path.join(tmpdir, "clean.xlsx")
+                    with zipfile.ZipFile(zip_path, "r") as zin:
+                        with zipfile.ZipFile(clean_path, "w", zipfile.ZIP_DEFLATED) as zout:
+                            for item in zin.infolist():
+                                # Pula arquivos de imagem .mpo e similares
+                                if any(item.filename.lower().endswith(ext) for ext in [".mpo", ".emf", ".wmf"]):
+                                    continue
+                                zout.writestr(item, zin.read(item.filename))
+                    wb = load_workbook(clean_path, data_only=True)
+            except Exception:
+                return pd.DataFrame()
+        else:
+            return pd.DataFrame()
 
     todos_itens = []
 
@@ -5274,11 +5300,31 @@ with aba6:
     )
 
     if arquivos_s5:
-        st.markdown(f"**{len(arquivos_s5)} arquivo(s) carregado(s).** Revise abaixo e clique em **Salvar todos** no final.")
+        # Validação de tamanho total — Streamlit Cloud rejeita lotes muito grandes
+        LIMITE_MB_POR_LOTE = 150
+        tamanho_total_mb = sum(a.size for a in arquivos_s5) / (1024 * 1024)
 
-        # ---- Pré-processamento: lê todos os arquivos e monta fila ----
-        fila = []
-        erros = []
+        if tamanho_total_mb > LIMITE_MB_POR_LOTE:
+            qtd_arquivos = len(arquivos_s5)
+            tamanho_medio = tamanho_total_mb / qtd_arquivos
+            lote_sugerido = max(1, int(LIMITE_MB_POR_LOTE / tamanho_medio))
+            st.error(
+                f"⛔ Tamanho total dos arquivos: **{tamanho_total_mb:.1f}MB** "
+                f"— excede o limite de {LIMITE_MB_POR_LOTE}MB por envio.\n\n"
+                f"Envie em lotes de até **{lote_sugerido} arquivo(s)** por vez."
+            )
+        else:
+            if tamanho_total_mb > 80:
+                st.warning(
+                    f"⚠️ Lote grande: {tamanho_total_mb:.1f}MB — "
+                    f"o processamento pode demorar um pouco mais."
+                )
+
+            st.markdown(f"**{len(arquivos_s5)} arquivo(s) — {tamanho_total_mb:.1f}MB total.** Revise abaixo e clique em **Salvar todos** no final.")
+
+            # ---- Pré-processamento: lê todos os arquivos e monta fila ----
+            fila = []
+            erros = []
 
         for idx_arquivo, arquivo_s5 in enumerate(arquivos_s5):
             ip_extraido          = extrair_ip_processo(arquivo_s5.name)
