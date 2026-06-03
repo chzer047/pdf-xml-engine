@@ -109,19 +109,27 @@ DB_PATH = "certificados.db"
 # CONEXÃO
 # ==========================================
 
-conn = sqlite3.connect(
-    DB_PATH,
-    check_same_thread=False
-)
+# Versão do banco — incrementada ao restaurar backup para forçar reconexão
+if "db_version" not in st.session_state:
+    st.session_state["db_version"] = 0
 
+@st.cache_resource(show_spinner=False)
+def get_connection(db_path, _version):
+    """
+    Conexão com o banco SQLite.
+    O parâmetro _version força reconexão quando o banco é restaurado.
+    """
+    c = sqlite3.connect(db_path, check_same_thread=False)
+    cur = c.cursor()
+    cur.execute("PRAGMA journal_mode=WAL")
+    cur.execute("PRAGMA synchronous=NORMAL")
+    cur.execute("PRAGMA cache_size=-32000")
+    cur.execute("PRAGMA temp_store=MEMORY")
+    c.commit()
+    return c
+
+conn   = get_connection(DB_PATH, st.session_state["db_version"])
 cursor = conn.cursor()
-
-# Otimizações de performance do SQLite
-cursor.execute("PRAGMA journal_mode=WAL")       # leituras não bloqueiam escritas
-cursor.execute("PRAGMA synchronous=NORMAL")     # mais rápido que FULL, ainda seguro
-cursor.execute("PRAGMA cache_size=-32000")      # 32MB de cache em memória
-cursor.execute("PRAGMA temp_store=MEMORY")      # operações temporárias em RAM
-conn.commit()
 
 # ==========================================
 # TABELAS
@@ -3915,7 +3923,10 @@ try:
             with open(DB_PATH, "wb") as f:
                 f.write(backup_geral_upload.read())
 
+            # Incrementa versão para forçar reconexão real ao banco novo
+            st.session_state["db_version"] = st.session_state.get("db_version", 0) + 1
             st.cache_data.clear()
+            st.cache_resource.clear()
             st.sidebar.success("Backup restaurado! Recarregando...")
             st.rerun()
 
@@ -4263,8 +4274,11 @@ if aba2 is not None:
             conn.close()
             with open(DB_PATH, "wb") as f:
                 f.write(backup_upload.read())
-            st.success("Backup importado com sucesso. Recarregue o app.")
-            st.stop()
+            st.session_state["db_version"] = st.session_state.get("db_version", 0) + 1
+            st.cache_data.clear()
+            st.cache_resource.clear()
+            st.success("Backup importado com sucesso. Recarregando...")
+            st.rerun()
 
     if Path(DB_PATH).exists():
         with open(DB_PATH, "rb") as f:
@@ -4858,8 +4872,11 @@ if aba3 is not None:
             conn.close()
             with open(DB_PATH, "wb") as f:
                 f.write(backup_registro_upload.read())
-            st.success("Backup importado com sucesso. Recarregue o app.")
-            st.stop()
+            st.session_state["db_version"] = st.session_state.get("db_version", 0) + 1
+            st.cache_data.clear()
+            st.cache_resource.clear()
+            st.success("Backup importado com sucesso. Recarregando...")
+            st.rerun()
 
     if Path(DB_PATH).exists():
         with open(DB_PATH, "rb") as f:
