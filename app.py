@@ -591,7 +591,7 @@ def parse_pdf(pdf_path):
 
                     ordem = clean(row[1])
 
-                    if not re.fullmatch(r"\d{3}", ordem):
+                    if not re.fullmatch(r"\d{3,4}", ordem):
                         continue
 
                     ordem = int(ordem)
@@ -5190,6 +5190,11 @@ with aba6:
     fabricas_disponiveis_s5 = listar_fabricas_sistema5_banco(cliente_s5, categoria_s5)
 
     usar_fabrica_existente = False
+    fabrica_padrao  = ""
+    ce_padrao       = ""
+    endereco_padrao = ""
+    idx_seguro      = 0
+    dados_fabrica_sugeridos = None
 
     if not fabricas_disponiveis_s5.empty:
         usar_fabrica_existente = st.checkbox(
@@ -5197,8 +5202,9 @@ with aba6:
             value=True,
             key="s5_usar_fabrica_existente"
         )
-
-    dados_fabrica_sugeridos = None
+    else:
+        if clean(cliente_s5):
+            st.info(f"ℹ️ Nenhuma fábrica cadastrada para **{cliente_s5}** ainda. Preencha os campos abaixo manualmente — a fábrica será criada ao salvar o primeiro processo.")
 
     if usar_fabrica_existente and not fabricas_disponiveis_s5.empty:
         opcoes_fabrica_s5 = []
@@ -5233,12 +5239,6 @@ with aba6:
 
         st.success("Dados da fábrica carregados ✅")
 
-    else:
-        fabrica_padrao  = ""
-        ce_padrao       = ""
-        endereco_padrao = ""
-        idx_seguro      = 0
-
     # key inclui cliente + índice da fábrica → sempre reseta ao trocar qualquer um dos dois
     _key_fab = f"{cliente_s5}_{idx_seguro}"
 
@@ -5262,7 +5262,7 @@ with aba6:
     with col_f2:
         endereco_s5 = st.text_area(
             "Endereço da fábrica",
-            value="" if pd.isna(endereco_padrao) else str(endereco_padrao),
+            value="" if not endereco_padrao or pd.isna(endereco_padrao) else str(endereco_padrao),
             placeholder="Cole aqui o endereço completo da fábrica",
             height=120,
             key=f"s5_endereco_{_key_fab}"
