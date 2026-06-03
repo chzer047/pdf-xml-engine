@@ -109,44 +109,35 @@ DB_PATH = "certificados.db"
 # CONEXÃO
 # ==========================================
 
-# Versão do banco — incrementada ao restaurar backup para forçar reconexão
 if "db_version" not in st.session_state:
     st.session_state["db_version"] = 0
 
-@st.cache_resource(show_spinner=False)
-def get_connection(db_path, _version):
-    """
-    Abre conexão com o banco SQLite.
-    _version força nova conexão quando o banco é restaurado.
-    """
+def _abrir_conexao(db_path):
     c = sqlite3.connect(db_path, check_same_thread=False)
-    cur = c.cursor()
-    cur.execute("PRAGMA journal_mode=WAL")
-    cur.execute("PRAGMA synchronous=NORMAL")
-    cur.execute("PRAGMA cache_size=-32000")
-    cur.execute("PRAGMA temp_store=MEMORY")
+    c.execute("PRAGMA journal_mode=WAL")
+    c.execute("PRAGMA synchronous=NORMAL")
+    c.execute("PRAGMA cache_size=-32000")
+    c.execute("PRAGMA temp_store=MEMORY")
     c.commit()
     return c
 
-def _testar_conexao(c):
-    """Retorna True se a conexão ainda está válida."""
+def _conexao_valida(c):
     try:
         c.execute("SELECT 1")
         return True
     except Exception:
         return False
 
+@st.cache_resource(show_spinner=False)
+def get_connection(db_path, _version):
+    return _abrir_conexao(db_path)
+
 conn = get_connection(DB_PATH, st.session_state["db_version"])
 
-# Se a conexão foi fechada (ex: após restaurar backup), reabre
-if not _testar_conexao(conn):
+# Fallback: se a conexão cacheada estiver fechada, abre diretamente
+if not _conexao_valida(conn):
     st.cache_resource.clear()
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA cache_size=-32000")
-    conn.execute("PRAGMA temp_store=MEMORY")
-    conn.commit()
+    conn = _abrir_conexao(DB_PATH)
 
 cursor = conn.cursor()
 
