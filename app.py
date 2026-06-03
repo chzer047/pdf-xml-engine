@@ -6307,3 +6307,41 @@ if aba9 is not None:
                 else:
                     st.error(mensagem)
 
+# ==========================================
+# ABA — ALTERAR SENHA (todos os usuários)
+# ==========================================
+
+st.divider()
+
+with st.expander(f"🔑 Alterar senha ({_usuario.upper()})", expanded=False):
+    st.caption("Sua nova senha será atualizada nos Secrets do Streamlit. Após salvar, use a nova senha no próximo login.")
+
+    senha_atual   = st.text_input("Senha atual", type="password", key="senha_atual_input")
+    nova_senha    = st.text_input("Nova senha", type="password", key="nova_senha_input")
+    confirma_nova = st.text_input("Confirmar nova senha", type="password", key="confirma_nova_input")
+
+    if st.button("Salvar nova senha", key="btn_salvar_senha"):
+        usuarios = carregar_usuarios()
+
+        if not usuarios:
+            st.error("Não foi possível carregar os usuários. Verifique os Secrets do Streamlit.")
+        elif not senha_atual or not nova_senha or not confirma_nova:
+            st.error("Preencha todos os campos.")
+        elif hash_senha(senha_atual) != usuarios.get(_usuario, {}).get("senha", ""):
+            st.error("Senha atual incorreta.")
+        elif nova_senha != confirma_nova:
+            st.error("A nova senha e a confirmação não coincidem.")
+        elif len(nova_senha) < 6:
+            st.error("A nova senha precisa ter pelo menos 6 caracteres.")
+        else:
+            novo_hash = hash_senha(nova_senha)
+            st.success("Nova senha gerada ✅")
+            st.info(
+                f"Acesse **Streamlit Cloud → Settings → Secrets** e substitua o hash do usuário `{_usuario}` pelo valor abaixo:"
+            )
+            st.code(
+                f'{_usuario} = {{ senha = "{novo_hash}", nivel = "{_nivel}" }}',
+                language="toml"
+            )
+            st.warning("Copie a linha acima e cole nos Secrets. Após salvar lá, sua nova senha estará ativa.")
+
