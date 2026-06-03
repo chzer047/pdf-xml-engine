@@ -3928,10 +3928,18 @@ try:
             with open(DB_PATH, "wb") as f:
                 f.write(backup_geral_upload.read())
 
+            # Reconecta imediatamente ao banco novo — sem depender do rerun
+            try:
+                conn.close()
+            except Exception:
+                pass
+            conn = _abrir_conexao(DB_PATH)
+            cursor = conn.cursor()
+
             st.session_state["db_version"] = st.session_state.get("db_version", 0) + 1
             st.cache_data.clear()
             st.cache_resource.clear()
-            st.sidebar.success("Backup restaurado! Recarregando...")
+            st.sidebar.success("✅ Backup restaurado! Recarregando...")
             st.rerun()
 
 except Exception as e:
@@ -4277,10 +4285,16 @@ if aba2 is not None:
         if confirmar_backup_aba2:
             with open(DB_PATH, "wb") as f:
                 f.write(backup_upload.read())
+            try:
+                conn.close()
+            except Exception:
+                pass
+            conn = _abrir_conexao(DB_PATH)
+            cursor = conn.cursor()
             st.session_state["db_version"] = st.session_state.get("db_version", 0) + 1
             st.cache_data.clear()
             st.cache_resource.clear()
-            st.success("Backup importado com sucesso. Recarregando...")
+            st.success("✅ Backup importado! Recarregando...")
             st.rerun()
 
     if Path(DB_PATH).exists():
@@ -4874,10 +4888,16 @@ if aba3 is not None:
         if confirmar_backup_aba3:
             with open(DB_PATH, "wb") as f:
                 f.write(backup_registro_upload.read())
+            try:
+                conn.close()
+            except Exception:
+                pass
+            conn = _abrir_conexao(DB_PATH)
+            cursor = conn.cursor()
             st.session_state["db_version"] = st.session_state.get("db_version", 0) + 1
             st.cache_data.clear()
             st.cache_resource.clear()
-            st.success("Backup importado com sucesso. Recarregando...")
+            st.success("✅ Backup importado! Recarregando...")
             st.rerun()
 
     if Path(DB_PATH).exists():
