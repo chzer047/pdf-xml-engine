@@ -61,7 +61,7 @@ def tela_login():
         usuario = st.text_input("Usuário", key="login_usuario").strip().lower()
         senha   = st.text_input("Senha", type="password", key="login_senha")
 
-        if st.button("Entrar", key="login_btn", type="primary", use_container_width=True):
+        if st.button("Entrar", key="login_btn", type="primary", width='stretch'):
             usuarios = carregar_usuarios()
 
             if not usuarios:
@@ -2200,6 +2200,23 @@ def normalizar_categoria_sistema5(valor):
     return valor
 
 
+def normalizar_df_para_exibicao(df):
+    """
+    Converte colunas com tipos mistos (int/str) para string
+    antes de exibir no st.dataframe, evitando ArrowTypeError.
+    """
+    if df is None or df.empty:
+        return df
+    df = df.copy()
+    for col in df.columns:
+        if df[col].dtype == object:
+            try:
+                df[col] = df[col].astype(str).replace("None", "").replace("nan", "")
+            except Exception:
+                pass
+    return df
+
+
 def normalizar_ip_processo(ip):
     """
     Normaliza IP de processo para formato padrão: IP-XXXX-XX
@@ -4125,7 +4142,7 @@ with aba1:
 
             st.dataframe(
                 df,
-                use_container_width=True
+                width='stretch'
             )
 
             st.info(
@@ -4149,13 +4166,13 @@ REV: {dados_certificado['rev']}
                 st.warning("Nenhum registro vinculado encontrado para este CE-BRI + FAMÍLIA.")
             else:
                 st.success("Registro vinculado encontrado ✅")
-                st.dataframe(registro_vinculado, use_container_width=True)
+                st.dataframe(normalizar_df_para_exibicao(registro_vinculado), width='stretch')
 
             duplicados = verificar_codigos_duplicados(df)
 
             if not duplicados.empty:
                 st.warning("Foram encontrados códigos duplicados neste PDF.")
-                st.dataframe(duplicados, use_container_width=True)
+                st.dataframe(normalizar_df_para_exibicao(duplicados), width='stretch')
 
             if not dados_certificado["ip_bri"]:
                 st.warning("⚠️ IP-BRI não encontrado neste PDF. O XML foi gerado, mas o certificado **não foi salvo no banco**.")
@@ -4316,7 +4333,7 @@ if aba2 is not None:
                 st.warning("Nenhum registro vinculado encontrado para este CE-BRI + FAMÍLIA.")
             else:
                 st.success("Registro vinculado encontrado ✅")
-                st.dataframe(registro_vinculado, use_container_width=True)
+                st.dataframe(normalizar_df_para_exibicao(registro_vinculado), width='stretch')
 
             if rows:
                 df_preview = pd.DataFrame(
@@ -4330,13 +4347,13 @@ if aba2 is not None:
                     ]
                 )
 
-                st.dataframe(df_preview, use_container_width=True)
+                st.dataframe(normalizar_df_para_exibicao(df_preview), width='stretch')
 
                 duplicados = verificar_codigos_duplicados(df_preview)
 
                 if not duplicados.empty:
                     st.warning("Foram encontrados códigos duplicados.")
-                    st.dataframe(duplicados, use_container_width=True)
+                    st.dataframe(normalizar_df_para_exibicao(duplicados), width='stretch')
 
                 if st.button("Salvar / Atualizar banco"):
                     status, mensagem = salvar_ou_atualizar_certificado(
@@ -4399,7 +4416,7 @@ if aba2 is not None:
             st.warning("Nenhum item encontrado.")
         else:
             st.success("Item encontrado ✅")
-            st.dataframe(resultado_item, use_container_width=True)
+            st.dataframe(normalizar_df_para_exibicao(resultado_item), width='stretch')
 
             st.download_button(
                 "Baixar resultado da pesquisa em CSV",
@@ -4452,7 +4469,7 @@ if aba2 is not None:
             st.success("Nenhum item repetido encontrado ✅")
         else:
             st.warning("Itens repetidos encontrados.")
-            st.dataframe(itens_repetidos, use_container_width=True)
+            st.dataframe(normalizar_df_para_exibicao(itens_repetidos), width='stretch')
 
             st.download_button(
                 "Baixar itens repetidos em CSV",
@@ -4510,7 +4527,7 @@ if aba2 is not None:
         ORDER BY i.modelo, c.ip_bri
         """, conn, params=(marca_filtro,))
 
-        st.dataframe(resultado_marca, use_container_width=True)
+        st.dataframe(normalizar_df_para_exibicao(resultado_marca), width='stretch')
 
         st.download_button(
             "Baixar CSV da marca",
@@ -4769,7 +4786,7 @@ if aba3 is not None:
 
                 st.dataframe(
                     df_filtrado,
-                    use_container_width=True
+                    width='stretch'
                 )
 
                 todas_fabricas.append(df_filtrado)
@@ -4786,7 +4803,7 @@ if aba3 is not None:
 
                 st.dataframe(
                     banco_registros,
-                    use_container_width=True
+                    width='stretch'
                 )
 
                 if st.button("Salvar registros desta base", key="salvar_registros_base"):
@@ -4917,7 +4934,7 @@ if aba3 is not None:
                         "ce_bri",
                         "endereco_fabrica"
                     ]],
-                    use_container_width=True
+                    width='stretch'
                 )
 
                 st.download_button(
@@ -5077,7 +5094,7 @@ with aba4:
 
             if candidatos_diag is not None and not candidatos_diag.empty:
                 st.info("Candidatos encontrados no Sistema 5:")
-                st.dataframe(candidatos_diag, use_container_width=True)
+                st.dataframe(normalizar_df_para_exibicao(candidatos_diag), width='stretch')
             else:
                 st.error("Nenhum candidato encontrado no Sistema 5 pela busca bruta.")
 
@@ -5136,7 +5153,7 @@ with aba4:
                 st.warning("Algumas referências verdes não foram encontradas no banco.")
                 st.dataframe(
                     pd.DataFrame({"referencia_nao_encontrada": sorted(set(nao_encontrados))}),
-                    use_container_width=True
+                    width='stretch'
                 )
 
             st.download_button(
@@ -5189,7 +5206,7 @@ if aba5 is not None:
                 st.warning("Nenhum registro encontrado para este IP-BRI.")
             else:
                 st.success(f"{len(resultado_ip)} resultado(s) encontrado(s) ✅")
-                st.dataframe(resultado_ip, use_container_width=True)
+                st.dataframe(normalizar_df_para_exibicao(resultado_ip), width='stretch')
 
                 st.download_button(
                     "Baixar resultado em CSV",
@@ -5216,7 +5233,7 @@ if aba5 is not None:
                 st.warning("Nenhum IP-BRI encontrado para este registro.")
             else:
                 st.success(f"{len(resultado_registro)} resultado(s) encontrado(s) ✅")
-                st.dataframe(resultado_registro, use_container_width=True)
+                st.dataframe(normalizar_df_para_exibicao(resultado_registro), width='stretch')
 
                 st.download_button(
                     "Baixar resultado em CSV",
@@ -5260,7 +5277,7 @@ if aba6 is not None:
                 st.warning("Nenhum item encontrado no Sistema 5.")
             else:
                 st.success(f"{len(resultado_global_s5)} item(ns) encontrado(s) no Sistema 5 ✅")
-                st.dataframe(resultado_global_s5, use_container_width=True)
+                st.dataframe(normalizar_df_para_exibicao(resultado_global_s5), width='stretch')
 
                 st.download_button(
                     "Baixar resultado Sistema 5 CSV",
@@ -5464,67 +5481,67 @@ if aba6 is not None:
             fila = []
             erros = []
 
-        for idx_arquivo, arquivo_s5 in enumerate(arquivos_s5):
-            ip_extraido          = extrair_ip_processo(arquivo_s5.name)
-            data_extraida        = extrair_data_processo(arquivo_s5.name)
-            tipo_detectado       = detectar_tipo_processo(arquivo_s5.name)
-            fabrica_detectada_nm = extrair_codigo_fabrica_nome(arquivo_s5.name)
-            dados_fab_arq        = buscar_fabrica_por_codigo_s5(cliente_s5, fabrica_detectada_nm) if fabrica_detectada_nm else None
+            for idx_arquivo, arquivo_s5 in enumerate(arquivos_s5):
+                ip_extraido          = extrair_ip_processo(arquivo_s5.name)
+                data_extraida        = extrair_data_processo(arquivo_s5.name)
+                tipo_detectado       = detectar_tipo_processo(arquivo_s5.name)
+                fabrica_detectada_nm = extrair_codigo_fabrica_nome(arquivo_s5.name)
+                dados_fab_arq        = buscar_fabrica_por_codigo_s5(cliente_s5, fabrica_detectada_nm) if fabrica_detectada_nm else None
 
-            if not ip_extraido:
-                erros.append({"arquivo": arquivo_s5.name, "motivo": "IP não encontrado no nome do arquivo"})
-                continue
+                if not ip_extraido:
+                    erros.append({"arquivo": arquivo_s5.name, "motivo": "IP não encontrado no nome do arquivo"})
+                    continue
 
-            # Fábrica selecionada manualmente SEMPRE tem prioridade.
-            # A detecção automática pelo nome do arquivo só preenche CE-BRI e endereço
-            # se o usuário não tiver informado — nunca sobrescreve a fábrica escolhida.
-            fab_final = fabrica_s5
-            ce_final  = ce_bri_s5
-            end_final = endereco_s5
+                # Fábrica selecionada manualmente SEMPRE tem prioridade.
+                # A detecção automática pelo nome do arquivo só preenche CE-BRI e endereço
+                # se o usuário não tiver informado — nunca sobrescreve a fábrica escolhida.
+                fab_final = fabrica_s5
+                ce_final  = ce_bri_s5
+                end_final = endereco_s5
 
-            # Se o usuário não preencheu fábrica manualmente, tenta puxar dos registros
-            if not clean(fab_final) and dados_fab_arq:
-                fab_final = dados_fab_arq.get("fabrica", "")
-                ce_final  = dados_fab_arq.get("ce_bri", "")
-                end_final = dados_fab_arq.get("endereco_fabrica", "")
-            elif dados_fab_arq:
-                # Fábrica manual definida — completa só CE-BRI e endereço se estiverem vazios
-                if not clean(ce_final):
-                    ce_final  = dados_fab_arq.get("ce_bri", ce_final)
-                if not clean(end_final):
-                    end_final = dados_fab_arq.get("endereco_fabrica", end_final)
+                # Se o usuário não preencheu fábrica manualmente, tenta puxar dos registros
+                if not clean(fab_final) and dados_fab_arq:
+                    fab_final = dados_fab_arq.get("fabrica", "")
+                    ce_final  = dados_fab_arq.get("ce_bri", "")
+                    end_final = dados_fab_arq.get("endereco_fabrica", "")
+                elif dados_fab_arq:
+                    # Fábrica manual definida — completa só CE-BRI e endereço se estiverem vazios
+                    if not clean(ce_final):
+                        ce_final  = dados_fab_arq.get("ce_bri", ce_final)
+                    if not clean(end_final):
+                        end_final = dados_fab_arq.get("endereco_fabrica", end_final)
 
-            dup = ip_processo_ja_existe_sistema5(ip_extraido, cliente_s5, fab_final)
+                dup = ip_processo_ja_existe_sistema5(ip_extraido, cliente_s5, fab_final)
 
-            try:
-                df_arq = ler_excel_inclusao_sistema5(arquivo_s5)
-            except Exception as e:
-                erros.append({"arquivo": arquivo_s5.name, "motivo": str(e)})
-                continue
+                try:
+                    df_arq = ler_excel_inclusao_sistema5(arquivo_s5)
+                except Exception as e:
+                    erros.append({"arquivo": arquivo_s5.name, "motivo": str(e)})
+                    continue
 
-            if df_arq.empty:
-                erros.append({"arquivo": arquivo_s5.name, "motivo": "Nenhum item encontrado no Excel"})
-                continue
+                if df_arq.empty:
+                    erros.append({"arquivo": arquivo_s5.name, "motivo": "Nenhum item encontrado no Excel"})
+                    continue
 
-            fabricante_sessao = st.session_state.get("s5_fabricante_sugerido", "")
-            if tipo_detectado == "RECERTIFICACAO" and fabricante_sessao:
-                mask = df_arq["MARCA"].isna() | (df_arq["MARCA"].str.strip() == "")
-                df_arq.loc[mask, "MARCA"] = fabricante_sessao
+                fabricante_sessao = st.session_state.get("s5_fabricante_sugerido", "")
+                if tipo_detectado == "RECERTIFICACAO" and fabricante_sessao:
+                    mask = df_arq["MARCA"].isna() | (df_arq["MARCA"].str.strip() == "")
+                    df_arq.loc[mask, "MARCA"] = fabricante_sessao
 
-            fila.append({
-                "idx":       idx_arquivo,
-                "arquivo":   arquivo_s5,
-                "nome":      arquivo_s5.name,
-                "ip":        ip_extraido,
-                "tipo":      tipo_detectado,
-                "data":      data_extraida or "",
-                "fabrica":   fab_final,
-                "ce_bri":    ce_final,
-                "endereco":  end_final,
-                "df":        df_arq,
-                "duplicado": dup,
-                "auto_fab":  dados_fab_arq is not None,
-            })
+                fila.append({
+                    "idx":       idx_arquivo,
+                    "arquivo":   arquivo_s5,
+                    "nome":      arquivo_s5.name,
+                    "ip":        ip_extraido,
+                    "tipo":      tipo_detectado,
+                    "data":      data_extraida or "",
+                    "fabrica":   fab_final,
+                    "ce_bri":    ce_final,
+                    "endereco":  end_final,
+                    "df":        df_arq,
+                    "duplicado": dup,
+                    "auto_fab":  dados_fab_arq is not None,
+                })
 
         if erros:
             st.error(f"⛔ {len(erros)} arquivo(s) com problema — serão ignorados no salvamento:")
@@ -5586,7 +5603,7 @@ if aba6 is not None:
 
                     if tem_dup:
                         st.warning("⚠️ Já existe processo com este IP para esta fábrica:")
-                        st.dataframe(item["duplicado"], use_container_width=True)
+                        st.dataframe(normalizar_df_para_exibicao(item["duplicado"]), width='stretch')
                         item["substituir"] = st.checkbox(
                             "Substituir processo existente ao salvar",
                             value=False,
@@ -5596,7 +5613,7 @@ if aba6 is not None:
                         item["substituir"] = False
 
                     st.caption("Prévia (primeiros 10 itens):")
-                    st.dataframe(item["df"].head(10), use_container_width=True)
+                    st.dataframe(normalizar_df_para_exibicao(item["df"].head)(10), width='stretch')
                     if len(item["df"]) > 10:
                         st.caption(f"... e mais {len(item['df']) - 10} item(ns)")
 
@@ -5745,7 +5762,7 @@ if aba6 is not None:
                                             st.warning("Nenhum item encontrado dentro deste processo.")
                                         else:
                                             st.success(f"{len(itens_do_processo)} item(ns) encontrado(s) neste processo ✅")
-                                            st.dataframe(itens_do_processo, use_container_width=True)
+                                            st.dataframe(normalizar_df_para_exibicao(itens_do_processo), width='stretch')
 
                                             st.download_button(
                                                 "Baixar itens deste processo CSV",
@@ -5835,7 +5852,7 @@ if aba7 is not None:
         st.success("Nenhuma família pendente de IP-BRI encontrada ✅")
     else:
         st.warning(f"{len(pendentes_ip_bri)} família(s) pendente(s) de IP-BRI.")
-        st.dataframe(pendentes_ip_bri, use_container_width=True)
+        st.dataframe(normalizar_df_para_exibicao(pendentes_ip_bri), width='stretch')
 
         st.download_button(
             "Baixar pendentes CSV",
@@ -5935,7 +5952,7 @@ if aba7 is not None:
     if manuais.empty:
         st.info("Nenhum IP-BRI manual cadastrado ainda.")
     else:
-        st.dataframe(manuais, use_container_width=True)
+        st.dataframe(normalizar_df_para_exibicao(manuais), width='stretch')
 
         st.download_button(
             "Baixar IP-BRI manuais CSV",
@@ -6059,7 +6076,7 @@ if aba8 is not None:
     if df_fabricas.empty:
         st.info("Nenhuma fábrica encontrada.")
     else:
-        st.dataframe(df_fabricas, use_container_width=True)
+        st.dataframe(normalizar_df_para_exibicao(df_fabricas), width='stretch')
 
         st.download_button(
             "Baixar resumo por fábrica CSV",
@@ -6102,7 +6119,7 @@ if aba8 is not None:
         if df_familias.empty:
             st.warning("Nenhuma família encontrada para os filtros selecionados.")
         else:
-            st.dataframe(df_familias, use_container_width=True)
+            st.dataframe(normalizar_df_para_exibicao(df_familias), width='stretch')
 
             st.download_button(
                 "Baixar detalhamento por família CSV",
@@ -6146,7 +6163,7 @@ if aba8 is not None:
                 st.info("Essa família não possui itens no Sistema 5.")
             else:
                 st.success(f"{len(df_itens_fam)} item(ns) encontrado(s) nesta família.")
-                st.dataframe(df_itens_fam, use_container_width=True)
+                st.dataframe(normalizar_df_para_exibicao(df_itens_fam), width='stretch')
 
                 st.download_button(
                     "Baixar itens da família CSV",
@@ -6179,7 +6196,7 @@ if aba9 is not None:
         st.success("Nenhum código suspeito encontrado no Sistema 5 ✅")
     else:
         st.warning(f"{len(suspeitos_s5)} código(s) suspeito(s) no Sistema 5.")
-        st.dataframe(suspeitos_s5, use_container_width=True)
+        st.dataframe(normalizar_df_para_exibicao(suspeitos_s5), width='stretch')
 
         st.download_button(
             "Baixar suspeitos Sistema 5 CSV",
@@ -6265,7 +6282,7 @@ if aba9 is not None:
         st.success("Nenhum código suspeito encontrado nos certificados oficiais ✅")
     else:
         st.warning(f"{len(suspeitos_cert)} código(s) suspeito(s) nos certificados oficiais.")
-        st.dataframe(suspeitos_cert, use_container_width=True)
+        st.dataframe(normalizar_df_para_exibicao(suspeitos_cert), width='stretch')
 
         st.download_button(
             "Baixar suspeitos Certificados CSV",
