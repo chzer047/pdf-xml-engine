@@ -3873,7 +3873,7 @@ except Exception as e:
     st.sidebar.warning(f"Backup geral indisponível: {e}")
 
 if eh_admin:
-    aba0, aba1, aba2, aba3, aba4, aba5, aba6, aba7, aba8, aba9 = st.tabs([
+    aba0, aba1, aba2, aba3, aba4, aba5, aba6, aba7, aba8, aba9, aba_adm = st.tabs([
         "🏠 Início",
         "PDF → XML",
         "Banco de Certificados",
@@ -3883,15 +3883,16 @@ if eh_admin:
         "Sistema 5",
         "IP-BRI Pendentes",
         "Painel de Cobertura",
-        "Correção de Códigos"
+        "Correção de Códigos",
+        "⚙️ Administração",
     ])
 else:
-    # Usuário comum: só XML e Confirmação
-    aba1, aba4 = st.tabs([
+    # Usuário comum: só XML, Confirmação e alterar senha
+    aba1, aba4, aba_adm = st.tabs([
         "PDF → XML",
         "Preenchimento de Confirmação",
+        "🔑 Minha senha",
     ])
-    # Placeholders para não quebrar referências de aba
     aba0 = aba2 = aba3 = aba5 = aba6 = aba7 = aba8 = aba9 = None
 
 # ==========================================
@@ -6307,41 +6308,164 @@ if aba9 is not None:
                 else:
                     st.error(mensagem)
 
+
 # ==========================================
-# ABA — ALTERAR SENHA (todos os usuários)
+# ABA ADMINISTRAÇÃO (admin) / MINHA SENHA (usuario)
 # ==========================================
 
-st.divider()
+with aba_adm:
 
-with st.expander(f"🔑 Alterar senha ({_usuario.upper()})", expanded=False):
-    st.caption("Sua nova senha será atualizada nos Secrets do Streamlit. Após salvar, use a nova senha no próximo login.")
+    if eh_admin:
+        st.title("⚙️ Administração")
+        st.caption("Gerencie os usuários do sistema. As senhas são armazenadas como hash — ninguém consegue ver a senha original.")
 
-    senha_atual   = st.text_input("Senha atual", type="password", key="senha_atual_input")
-    nova_senha    = st.text_input("Nova senha", type="password", key="nova_senha_input")
-    confirma_nova = st.text_input("Confirmar nova senha", type="password", key="confirma_nova_input")
+        usuarios_atuais = carregar_usuarios()
 
-    if st.button("Salvar nova senha", key="btn_salvar_senha"):
-        usuarios = carregar_usuarios()
+        # ---- Usuários cadastrados ----
+        st.subheader("Usuários cadastrados")
 
-        if not usuarios:
-            st.error("Não foi possível carregar os usuários. Verifique os Secrets do Streamlit.")
-        elif not senha_atual or not nova_senha or not confirma_nova:
-            st.error("Preencha todos os campos.")
-        elif hash_senha(senha_atual) != usuarios.get(_usuario, {}).get("senha", ""):
-            st.error("Senha atual incorreta.")
-        elif nova_senha != confirma_nova:
-            st.error("A nova senha e a confirmação não coincidem.")
-        elif len(nova_senha) < 6:
-            st.error("A nova senha precisa ter pelo menos 6 caracteres.")
+        if not usuarios_atuais:
+            st.warning("Nenhum usuário encontrado nos Secrets. Configure o secrets.toml.")
         else:
-            novo_hash = hash_senha(nova_senha)
-            st.success("Nova senha gerada ✅")
-            st.info(
-                f"Acesse **Streamlit Cloud → Settings → Secrets** e substitua o hash do usuário `{_usuario}` pelo valor abaixo:"
-            )
-            st.code(
-                f'{_usuario} = {{ senha = "{novo_hash}", nivel = "{_nivel}" }}',
-                language="toml"
-            )
-            st.warning("Copie a linha acima e cole nos Secrets. Após salvar lá, sua nova senha estará ativa.")
+            for nome_usr, dados_usr in usuarios_atuais.items():
+                nivel_usr = dados_usr.get("nivel", "usuario")
+                icone = "👑" if nivel_usr == "admin" else "👤"
+                with st.expander(f"{icone} {nome_usr.upper()} — {nivel_usr.capitalize()}", expanded=False):
 
+                    st.caption("Redefinir senha deste usuário")
+                    nova_senha_adm = st.text_input(
+                        "Nova senha",
+                        type="password",
+                        key=f"adm_nova_senha_{nome_usr}"
+                    )
+                    confirma_adm = st.text_input(
+                        "Confirmar nova senha",
+                        type="password",
+                        key=f"adm_confirma_{nome_usr}"
+                    )
+
+                    if st.button(f"Salvar nova senha para {nome_usr}", key=f"adm_salvar_{nome_usr}"):
+                        if not nova_senha_adm or not confirma_adm:
+                            st.error("Preencha os dois campos.")
+                        elif nova_senha_adm != confirma_adm:
+                            st.error("As senhas não coincidem.")
+                        elif len(nova_senha_adm) < 6:
+                            st.error("Mínimo 6 caracteres.")
+                        else:
+                            novo_hash_adm = hash_senha(nova_senha_adm)
+                            st.success(f"Hash gerado para {nome_usr} ✅")
+                            st.info("Cole a linha abaixo nos **Secrets do Streamlit Cloud** (Settings → Secrets):")
+                            st.code(
+                                f'{nome_usr} = {{ senha = "{novo_hash_adm}", nivel = "{nivel_usr}" }}',
+                                language="toml"
+                            )
+
+        st.divider()
+
+        # ---- Criar novo usuário ----
+        st.subheader("Criar novo usuário")
+
+        col_nu1, col_nu2 = st.columns(2)
+        with col_nu1:
+            novo_usuario_nome = st.text_input(
+                "Nome de usuário",
+                placeholder="Ex: joao, maria, operador2",
+                key="novo_usuario_nome"
+            ).strip().lower()
+            novo_usuario_nivel = st.selectbox(
+                "Nível de acesso",
+                ["usuario", "admin"],
+                format_func=lambda x: "👤 Usuário (só XML e Confirmação)" if x == "usuario" else "👑 Admin (acesso total)",
+                key="novo_usuario_nivel"
+            )
+        with col_nu2:
+            novo_usuario_senha = st.text_input(
+                "Senha",
+                type="password",
+                key="novo_usuario_senha"
+            )
+            novo_usuario_confirma = st.text_input(
+                "Confirmar senha",
+                type="password",
+                key="novo_usuario_confirma"
+            )
+
+        if st.button("➕ Gerar linha para novo usuário", key="btn_criar_usuario"):
+            if not novo_usuario_nome:
+                st.error("Informe o nome de usuário.")
+            elif not re.fullmatch(r"[a-z0-9_]+", novo_usuario_nome):
+                st.error("Nome de usuário só pode ter letras minúsculas, números e underscore.")
+            elif novo_usuario_nome in (usuarios_atuais or {}):
+                st.error(f"Usuário '{novo_usuario_nome}' já existe.")
+            elif not novo_usuario_senha or not novo_usuario_confirma:
+                st.error("Preencha a senha e a confirmação.")
+            elif novo_usuario_senha != novo_usuario_confirma:
+                st.error("As senhas não coincidem.")
+            elif len(novo_usuario_senha) < 6:
+                st.error("Mínimo 6 caracteres.")
+            else:
+                hash_novo = hash_senha(novo_usuario_senha)
+                st.success(f"Usuário **{novo_usuario_nome}** gerado ✅")
+                st.info("Cole a linha abaixo nos **Secrets do Streamlit Cloud** (Settings → Secrets), dentro do bloco `[usuarios]`:")
+                st.code(
+                    f'{novo_usuario_nome} = {{ senha = "{hash_novo}", nivel = "{novo_usuario_nivel}" }}',
+                    language="toml"
+                )
+
+        st.divider()
+
+        # ---- Remover usuário ----
+        st.subheader("🗑️ Remover usuário")
+        st.caption("Remove a linha do usuário dos Secrets. Não é possível remover a si mesmo.")
+
+        outros_usuarios = [u for u in (usuarios_atuais or {}).keys() if u != _usuario]
+
+        if not outros_usuarios:
+            st.info("Nenhum outro usuário cadastrado para remover.")
+        else:
+            usuario_remover = st.selectbox(
+                "Selecione o usuário para remover",
+                outros_usuarios,
+                key="usuario_remover_select"
+            )
+            confirmar_remover = st.checkbox(
+                f"Confirmo que quero remover o usuário {usuario_remover}",
+                key="confirmar_remover_usuario"
+            )
+            if confirmar_remover:
+                if st.button(f"🗑️ Remover {usuario_remover}", key="btn_remover_usuario"):
+                    st.success(f"Para remover **{usuario_remover}**, delete a linha abaixo dos Secrets:")
+                    st.code(
+                        f'{usuario_remover} = {{ senha = "...", nivel = "..." }}',
+                        language="toml"
+                    )
+                    st.warning("Acesse Streamlit Cloud → Settings → Secrets e delete a linha deste usuário.")
+
+    else:
+        # Usuário comum — só altera a própria senha
+        st.title("🔑 Minha senha")
+        st.caption("Altere sua senha de acesso ao sistema.")
+
+        senha_atual_usr   = st.text_input("Senha atual", type="password", key="senha_atual_usr")
+        nova_senha_usr    = st.text_input("Nova senha", type="password", key="nova_senha_usr")
+        confirma_nova_usr = st.text_input("Confirmar nova senha", type="password", key="confirma_nova_usr")
+
+        if st.button("Salvar nova senha", key="btn_salvar_senha_usr"):
+            usuarios = carregar_usuarios()
+
+            if not senha_atual_usr or not nova_senha_usr or not confirma_nova_usr:
+                st.error("Preencha todos os campos.")
+            elif hash_senha(senha_atual_usr) != usuarios.get(_usuario, {}).get("senha", ""):
+                st.error("Senha atual incorreta.")
+            elif nova_senha_usr != confirma_nova_usr:
+                st.error("A nova senha e a confirmação não coincidem.")
+            elif len(nova_senha_usr) < 6:
+                st.error("A nova senha precisa ter pelo menos 6 caracteres.")
+            else:
+                novo_hash_usr = hash_senha(nova_senha_usr)
+                st.success("Nova senha gerada ✅")
+                st.info("Informe ao administrador para atualizar nos Secrets com a linha abaixo:")
+                st.code(
+                    f'{_usuario} = {{ senha = "{novo_hash_usr}", nivel = "{_nivel}" }}',
+                    language="toml"
+                )
