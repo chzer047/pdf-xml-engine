@@ -27,6 +27,82 @@ st.set_page_config(
     layout="wide"
 )
 
+# ==========================================
+# AUTENTICAÇÃO
+# ==========================================
+
+import hashlib
+
+def hash_senha(senha):
+    return hashlib.sha256(senha.encode()).hexdigest()
+
+def carregar_usuarios():
+    """
+    Usuários definidos no secrets.toml do Streamlit.
+    Formato esperado:
+    [usuarios]
+    carlos   = { senha = "hash_aqui", nivel = "admin" }
+    operador = { senha = "hash_aqui", nivel = "usuario" }
+    """
+    try:
+        return st.secrets.get("usuarios", {})
+    except Exception:
+        return {}
+
+def tela_login():
+    col_login = st.columns([1, 2, 1])[1]
+
+    with col_login:
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        st.title("🔐 C XML BR Engine")
+        st.caption("Faça login para acessar o sistema.")
+        st.divider()
+
+        usuario = st.text_input("Usuário", key="login_usuario").strip().lower()
+        senha   = st.text_input("Senha", type="password", key="login_senha")
+
+        if st.button("Entrar", key="login_btn", type="primary", use_container_width=True):
+            usuarios = carregar_usuarios()
+
+            if not usuarios:
+                # Modo fallback: sem secrets configurado, aceita admin/admin (para desenvolvimento)
+                if usuario == "admin" and senha == "admin":
+                    st.session_state["autenticado"]  = True
+                    st.session_state["usuario_atual"] = "admin"
+                    st.session_state["nivel_acesso"]  = "admin"
+                    st.rerun()
+                else:
+                    st.error("Usuário ou senha incorretos.")
+                return
+
+            dados_usuario = usuarios.get(usuario)
+
+            if not dados_usuario:
+                st.error("Usuário ou senha incorretos.")
+                return
+
+            senha_hash = hash_senha(senha)
+
+            if dados_usuario.get("senha") != senha_hash:
+                st.error("Usuário ou senha incorretos.")
+                return
+
+            st.session_state["autenticado"]  = True
+            st.session_state["usuario_atual"] = usuario
+            st.session_state["nivel_acesso"]  = dados_usuario.get("nivel", "usuario")
+            st.rerun()
+
+# Verificar autenticação
+if not st.session_state.get("autenticado"):
+    tela_login()
+    st.stop()
+
+# Atalhos de nível de acesso
+_nivel        = st.session_state.get("nivel_acesso", "usuario")
+_usuario      = st.session_state.get("usuario_atual", "")
+eh_admin      = (_nivel == "admin")
+eh_usuario    = (_nivel == "usuario")
+
 DB_PATH = "certificados.db"
 
 # ==========================================
@@ -3741,6 +3817,18 @@ def aplicar_zero_esquerda_certificado_por_id(item_id, tamanho_final=13):
 
 aviso_backup_diario()
 
+# Info do usuário logado + logout
+st.sidebar.markdown(
+    f"👤 **{_usuario.upper()}** "
+    f"({'Admin' if eh_admin else 'Usuário'})"
+)
+if st.sidebar.button("🚪 Sair", key="logout_btn"):
+    for key in ["autenticado", "usuario_atual", "nivel_acesso"]:
+        st.session_state.pop(key, None)
+    st.rerun()
+
+st.sidebar.divider()
+
 try:
     st.sidebar.header("Backup Geral")
     st.sidebar.caption("Backup centralizado: baixar e restaurar tudo pelo mesmo local.")
@@ -3784,24 +3872,34 @@ try:
 except Exception as e:
     st.sidebar.warning(f"Backup geral indisponível: {e}")
 
-aba0, aba1, aba2, aba3, aba4, aba5, aba6, aba7, aba8, aba9 = st.tabs([
-    "🏠 Início",
-    "PDF → XML",
-    "Banco de Certificados",
-    "Registros",
-    "Preenchimento de Confirmação",
-    "Pesquisa Avançada",
-    "Sistema 5",
-    "IP-BRI Pendentes",
-    "Painel de Cobertura",
-    "Correção de Códigos"
-])
+if eh_admin:
+    aba0, aba1, aba2, aba3, aba4, aba5, aba6, aba7, aba8, aba9 = st.tabs([
+        "🏠 Início",
+        "PDF → XML",
+        "Banco de Certificados",
+        "Registros",
+        "Preenchimento de Confirmação",
+        "Pesquisa Avançada",
+        "Sistema 5",
+        "IP-BRI Pendentes",
+        "Painel de Cobertura",
+        "Correção de Códigos"
+    ])
+else:
+    # Usuário comum: só XML e Confirmação
+    aba1, aba4 = st.tabs([
+        "PDF → XML",
+        "Preenchimento de Confirmação",
+    ])
+    # Placeholders para não quebrar referências de aba
+    aba0 = aba2 = aba3 = aba5 = aba6 = aba7 = aba8 = aba9 = None
 
 # ==========================================
 # ABA 0 - INÍCIO / COMO USAR
 # ==========================================
 
-with aba0:
+if aba0 is not None:
+ with aba0:
     st.title("C XML BR Engine")
     st.caption("Sistema de gestão de certificados IP-BRI, geração de XML e preenchimento automático de confirmações.")
 
@@ -4078,7 +4176,8 @@ REV: {dados_certificado['rev']}
 # ABA 2 - BANCO
 # ==========================================
 
-with aba2:
+if aba2 is not None:
+ with aba2:
     st.title("Banco de Certificados")
 
     # --- Dashboard de métricas ---
@@ -4548,7 +4647,8 @@ with aba2:
 # ABA 3 - REGISTROS
 # ==========================================
 
-with aba3:
+if aba3 is not None:
+ with aba3:
     st.title("Registros")
 
     st.subheader("Enviar Excel de Registros")
@@ -5020,7 +5120,8 @@ with aba4:
 # ABA 5 - PESQUISA AVANÇADA
 # ==========================================
 
-with aba5:
+if aba5 is not None:
+ with aba5:
     st.title("Pesquisa Avançada")
 
     with st.expander("ℹ️ Como funciona esta aba"):
@@ -5098,7 +5199,8 @@ with aba5:
 # ABA 6 - SISTEMA 5
 # ==========================================
 
-with aba6:
+if aba6 is not None:
+ with aba6:
     st.title("Sistema 5")
 
     if st.button("Limpar itens DESCONSIDERADOS já cadastrados", key="limpar_desconsiderados_s5"):
@@ -5682,7 +5784,8 @@ with aba6:
 # ABA 7 - IP-BRI PENDENTES
 # ==========================================
 
-with aba7:
+if aba7 is not None:
+ with aba7:
     st.title("IP-BRI Pendentes")
 
     st.info(
@@ -5894,7 +5997,8 @@ with aba7:
 # ABA 8 - PAINEL DE COBERTURA
 # ==========================================
 
-with aba8:
+if aba8 is not None:
+ with aba8:
     st.title("Painel de Cobertura")
 
     st.info(
@@ -6024,7 +6128,8 @@ with aba8:
 # ABA 9 - CORREÇÃO DE CÓDIGOS DE BARRAS
 # ==========================================
 
-with aba9:
+if aba9 is not None:
+ with aba9:
     st.title("Correção de Códigos de Barras")
 
     st.warning(
