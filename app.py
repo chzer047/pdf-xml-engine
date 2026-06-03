@@ -1831,6 +1831,8 @@ def preencher_excel_confirmacao(uploaded_file):
                 if campo == "CODIGO":
                     cell.number_format = "@"
                     cell.value = str(valor)
+                elif campo == "NOME":
+                    cell.value = limitar_nome(valor)
                 else:
                     cell.value = valor
 
