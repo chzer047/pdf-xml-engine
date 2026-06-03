@@ -116,8 +116,8 @@ if "db_version" not in st.session_state:
 @st.cache_resource(show_spinner=False)
 def get_connection(db_path, _version):
     """
-    Conexão com o banco SQLite.
-    O parâmetro _version força reconexão quando o banco é restaurado.
+    Abre conexão com o banco SQLite.
+    _version força nova conexão quando o banco é restaurado.
     """
     c = sqlite3.connect(db_path, check_same_thread=False)
     cur = c.cursor()
@@ -128,7 +128,26 @@ def get_connection(db_path, _version):
     c.commit()
     return c
 
-conn   = get_connection(DB_PATH, st.session_state["db_version"])
+def _testar_conexao(c):
+    """Retorna True se a conexão ainda está válida."""
+    try:
+        c.execute("SELECT 1")
+        return True
+    except Exception:
+        return False
+
+conn = get_connection(DB_PATH, st.session_state["db_version"])
+
+# Se a conexão foi fechada (ex: após restaurar backup), reabre
+if not _testar_conexao(conn):
+    st.cache_resource.clear()
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute("PRAGMA cache_size=-32000")
+    conn.execute("PRAGMA temp_store=MEMORY")
+    conn.commit()
+
 cursor = conn.cursor()
 
 # ==========================================
@@ -3915,15 +3934,9 @@ try:
             key="confirmar_restore_sidebar"
         )
         if confirmar_sidebar:
-            try:
-                conn.close()
-            except Exception:
-                pass
-
             with open(DB_PATH, "wb") as f:
                 f.write(backup_geral_upload.read())
 
-            # Incrementa versão para forçar reconexão real ao banco novo
             st.session_state["db_version"] = st.session_state.get("db_version", 0) + 1
             st.cache_data.clear()
             st.cache_resource.clear()
@@ -4271,7 +4284,6 @@ if aba2 is not None:
         st.warning("⚠️ Isso irá **substituir completamente** o banco atual. Esta ação não pode ser desfeita.")
         confirmar_backup_aba2 = st.checkbox("Confirmo que quero substituir o banco atual", key="confirmar_backup_aba2")
         if confirmar_backup_aba2:
-            conn.close()
             with open(DB_PATH, "wb") as f:
                 f.write(backup_upload.read())
             st.session_state["db_version"] = st.session_state.get("db_version", 0) + 1
@@ -4869,7 +4881,6 @@ if aba3 is not None:
         st.warning("⚠️ Isso irá **substituir completamente** o banco atual. Esta ação não pode ser desfeita.")
         confirmar_backup_aba3 = st.checkbox("Confirmo que quero substituir o banco atual", key="confirmar_backup_aba3")
         if confirmar_backup_aba3:
-            conn.close()
             with open(DB_PATH, "wb") as f:
                 f.write(backup_registro_upload.read())
             st.session_state["db_version"] = st.session_state.get("db_version", 0) + 1
