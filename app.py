@@ -1624,7 +1624,8 @@ def metricas_banco():
 def atualizar_familias_certificados():
     """
     Executada UMA VEZ na inicialização.
-    Centraliza: estrutura do banco, reparo da tabela itens e famílias faltantes.
+    Centraliza: estrutura do banco, reparo da tabela itens, famílias faltantes
+    e normalização de IPs de processo.
     """
     try:
         garantir_estrutura_banco()
@@ -1643,6 +1644,23 @@ def atualizar_familias_certificados():
             if fam:
                 cursor.execute("UPDATE certificados SET familia = ? WHERE id = ?", (fam, cert_id))
         conn.commit()
+    except Exception:
+        pass
+
+    # Normaliza IPs de processo salvos com espaço (IP 0852-26 → IP-0852-26)
+    try:
+        ips_antigos = cursor.execute(
+            "SELECT id, ip_processo FROM sistema5_arquivos WHERE ip_processo LIKE 'IP %'"
+        ).fetchall()
+        for arq_id, ip_old in ips_antigos:
+            ip_new = normalizar_ip_processo(ip_old)
+            if ip_new != ip_old:
+                cursor.execute(
+                    "UPDATE sistema5_arquivos SET ip_processo = ? WHERE id = ?",
+                    (ip_new, arq_id)
+                )
+        if ips_antigos:
+            conn.commit()
     except Exception:
         pass
 
@@ -2182,11 +2200,26 @@ def normalizar_categoria_sistema5(valor):
     return valor
 
 
+def normalizar_ip_processo(ip):
+    """
+    Normaliza IP de processo para formato padrão: IP-XXXX-XX
+    Aceita: IP-0852-26, IP 0852-26, IP0852-26, ip-0852-26
+    Sempre retorna no formato IP-XXXX-XX em maiúsculas.
+    """
+    if not ip:
+        return ""
+    # Remove espaços extras, uppercase
+    ip = clean(ip).upper()
+    # Garante que entre IP e os números sempre tem hífen
+    ip = re.sub(r"\bIP[\s\-]*(\d)", r"IP-\1", ip)
+    return ip
+
+
 def extrair_ip_processo(nome):
     texto = clean(nome).upper()
     match = re.search(r"\bIP[- ]?\d+[-/]\d+\b", texto)
     if match:
-        return match.group(0).replace(" ", "-")
+        return normalizar_ip_processo(match.group(0))
     return None
 
 
@@ -2748,7 +2781,7 @@ def ip_processo_ja_existe_sistema5(ip_processo, cliente_base="", fabrica=""):
     Retorna os processos já salvos com o mesmo IP.
     Filtra por cliente_base e fabrica se informados.
     """
-    ip = clean(ip_processo).upper()
+    ip = normalizar_ip_processo(clean(ip_processo).upper())
 
     where = ["UPPER(a.ip_processo) = ?"]
     params = [ip]
@@ -2810,7 +2843,7 @@ def salvar_inclusao_sistema5(categoria, cliente_base, fabrica, ce_bri, endereco_
     ce_bri = clean(ce_bri).upper()
     endereco_fabrica = clean(endereco_fabrica)
     tipo_processo = clean(tipo_processo).upper()
-    ip_processo = clean(ip_processo).upper()
+    ip_processo = normalizar_ip_processo(clean(ip_processo).upper())
 
     cliente_id = get_or_create_cliente_sistema5(categoria, cliente_base)
     fabrica_id = get_or_create_fabrica_sistema5(cliente_id, fabrica, ce_bri, endereco_fabrica)
