@@ -1,2 +1,2 @@
-toml[server]
+[server]
 maxUploadSize = 500
