@@ -113,13 +113,28 @@ if "db_version" not in st.session_state:
     st.session_state["db_version"] = 0
 
 def _abrir_conexao(db_path):
-    c = sqlite3.connect(db_path, check_same_thread=False)
+    c = sqlite3.connect(db_path, check_same_thread=False, timeout=30)
     c.execute("PRAGMA journal_mode=WAL")
     c.execute("PRAGMA synchronous=NORMAL")
     c.execute("PRAGMA cache_size=-32000")
     c.execute("PRAGMA temp_store=MEMORY")
+    c.execute("PRAGMA busy_timeout=10000")
     c.commit()
     return c
+
+
+def commit_seguro(tentativas=5, espera=0.5):
+    """Faz commit com retry em caso de lock do SQLite."""
+    import time
+    for i in range(tentativas):
+        try:
+            conn.commit()
+            return
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e).lower() and i < tentativas - 1:
+                time.sleep(espera)
+            else:
+                raise
 
 def _conexao_valida(c):
     try:
@@ -278,19 +293,19 @@ CREATE TABLE IF NOT EXISTS ip_bri_familias (
 )
 """)
 
-conn.commit()
+commit_seguro()
 
 
 # Garante colunas novas antes de criar índices em bancos antigos
 try:
     cursor.execute("ALTER TABLE sistema5_itens ADD COLUMN modelo_ref_key TEXT")
-    conn.commit()
+    commit_seguro()
 except sqlite3.OperationalError:
     pass
 
 try:
     cursor.execute("ALTER TABLE itens ADD COLUMN modelo_ref_key TEXT")
-    conn.commit()
+    commit_seguro()
 except sqlite3.OperationalError:
     pass
 
@@ -304,7 +319,7 @@ cursor.execute("CREATE INDEX IF NOT EXISTS idx_s5_itens_arquivo_id ON sistema5_i
 cursor.execute("CREATE INDEX IF NOT EXISTS idx_s5_itens_modelo_ref_key ON sistema5_itens(modelo_ref_key)")
 cursor.execute("CREATE INDEX IF NOT EXISTS idx_itens_modelo_ref_key ON itens(modelo_ref_key)")
 cursor.execute("CREATE INDEX IF NOT EXISTS idx_ip_bri_familias_ce_fam ON ip_bri_familias(ce_bri, familia)")
-conn.commit()
+commit_seguro()
 
 # ==========================================
 # FUNÇÕES GERAIS
@@ -501,7 +516,7 @@ def atualizar_chaves_referencia_banco():
                 (referencia_inicial_chave_modelo(modelo), item_id)
             )
 
-        conn.commit()
+        commit_seguro()
     except Exception:
         pass
 
@@ -789,7 +804,7 @@ def registrar_historico(
         datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     ))
 
-    conn.commit()
+    commit_seguro()
 
 
 
@@ -922,7 +937,7 @@ def garantir_estrutura_banco():
     )
     """)
 
-    conn.commit()
+    commit_seguro()
 
     # Ajustes para bancos antigos (colunas que podem não existir)
     ajustes = [
@@ -963,13 +978,13 @@ def garantir_estrutura_banco():
     for tabela, coluna, tipo in ajustes:
         try:
             cursor.execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {tipo}")
-            conn.commit()
+            commit_seguro()
         except sqlite3.OperationalError:
             pass
 
     try:
         cursor.execute("UPDATE registros SET cliente_base = 'BOLSA' WHERE cliente_base IS NULL OR cliente_base = ''")
-        conn.commit()
+        commit_seguro()
     except Exception:
         pass
 
@@ -1026,7 +1041,7 @@ def reparar_tabela_itens_se_necessario():
         pass
 
     cursor.execute("ALTER TABLE itens_corrigida RENAME TO itens")
-    conn.commit()
+    commit_seguro()
 
 
 def inserir_item_seguro(certificado_id, r):
@@ -1093,7 +1108,7 @@ def salvar_ou_atualizar_certificado(
             datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         ))
 
-        conn.commit()
+        commit_seguro()
 
         certificado_id = cursor.lastrowid
 
@@ -1117,7 +1132,7 @@ def salvar_ou_atualizar_certificado(
                 r[4]
             ))
 
-        conn.commit()
+        commit_seguro()
 
         registrar_historico(
             ip_bri,
@@ -1187,7 +1202,7 @@ def salvar_ou_atualizar_certificado(
         for r in rows:
             inserir_item_seguro(certificado_id, r)
 
-        conn.commit()
+        commit_seguro()
 
         registrar_historico(
             ip_bri,
@@ -1254,7 +1269,7 @@ def salvar_ou_atualizar_certificado(
     for r in rows:
         inserir_item_seguro(certificado_id, r)
 
-    conn.commit()
+    commit_seguro()
 
     registrar_historico(
         ip_bri,
@@ -1491,7 +1506,7 @@ def salvar_registros_no_banco(banco_registros, arquivo_nome, cliente_base, ender
         ))
         total += 1
 
-    conn.commit()
+    commit_seguro()
     return total
 
 
@@ -1661,7 +1676,7 @@ def atualizar_familias_certificados():
             fam = extrair_familia_ip_bri(ip_bri_atual)
             if fam:
                 cursor.execute("UPDATE certificados SET familia = ? WHERE id = ?", (fam, cert_id))
-        conn.commit()
+        commit_seguro()
     except Exception:
         pass
 
@@ -1678,7 +1693,7 @@ def atualizar_familias_certificados():
                     (ip_new, arq_id)
                 )
         if ips_antigos:
-            conn.commit()
+            commit_seguro()
     except Exception:
         pass
 
@@ -1974,7 +1989,7 @@ def atualizar_endereco_fabrica_existente(cliente_base, fabrica, novo_endereco):
         fabrica
     ))
 
-    conn.commit()
+    commit_seguro()
     return cursor.rowcount
 
 
@@ -2053,7 +2068,7 @@ def salvar_ip_bri_familia(ce_bri, familia, ip_bri, observacao=""):
         VALUES (?, ?, ?, ?, ?, ?)
         """, (ce_bri, familia, ip_bri, observacao, agora_txt, agora_txt))
 
-    conn.commit()
+    commit_seguro()
     return True, f"IP-BRI {ip_bri} salvo para {ce_bri} / família {familia}."
 
 def buscar_ip_bri_manual_familia(ce_bri, familia):
@@ -2290,7 +2305,7 @@ def get_or_create_cliente_sistema5(categoria, cliente_base):
     INSERT OR IGNORE INTO sistema5_clientes (categoria, cliente_base, data_cadastro)
     VALUES (?, ?, ?)
     """, (categoria, cliente_base, datetime.now().strftime("%d/%m/%Y %H:%M:%S")))
-    conn.commit()
+    commit_seguro()
 
     return cursor.execute("""
     SELECT id FROM sistema5_clientes
@@ -2324,7 +2339,7 @@ def get_or_create_fabrica_sistema5(cliente_id, fabrica, ce_bri="", endereco_fabr
     WHERE cliente_id = ? AND fabrica = ?
     """, (ce_bri, endereco_fabrica, cliente_id, fabrica))
 
-    conn.commit()
+    commit_seguro()
 
     return cursor.execute("""
     SELECT id FROM sistema5_fabricas
@@ -2453,7 +2468,7 @@ def limpar_itens_desconsiderados_sistema5():
         OR UPPER(familia) LIKE '%DESCONSIDERADA%'
         """)
 
-        conn.commit()
+        commit_seguro()
 
         return qtd_antes
 
@@ -2866,7 +2881,7 @@ def deletar_processo_sistema5(arquivo_id):
 
     cursor.execute("DELETE FROM sistema5_itens WHERE arquivo_id = ?", (arquivo_id,))
     cursor.execute("DELETE FROM sistema5_arquivos WHERE id = ?", (arquivo_id,))
-    conn.commit()
+    commit_seguro()
 
     return qtd
 
@@ -2897,7 +2912,7 @@ def salvar_inclusao_sistema5(categoria, cliente_base, fabrica, ce_bri, endereco_
         arquivo_nome,
         datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     ))
-    conn.commit()
+    commit_seguro()
     arquivo_id = cursor.lastrowid
 
     total = 0
@@ -2932,7 +2947,7 @@ def salvar_inclusao_sistema5(categoria, cliente_base, fabrica, ce_bri, endereco_
         ))
         total += 1
 
-    conn.commit()
+    commit_seguro()
     return total
 
 
@@ -3799,7 +3814,7 @@ def atualizar_codigo_sistema5_por_id(item_id, novo_codigo):
     WHERE id = ?
     """, (codigo, item_id))
 
-    conn.commit()
+    commit_seguro()
     return True, f"Código atualizado no Sistema 5: {codigo}"
 
 
@@ -3816,7 +3831,7 @@ def atualizar_codigo_certificado_por_id(item_id, novo_codigo):
     WHERE id = ?
     """, (codigo, item_id))
 
-    conn.commit()
+    commit_seguro()
     return True, f"Código atualizado no banco de certificados: {codigo}"
 
 
@@ -3846,7 +3861,7 @@ def aplicar_zero_esquerda_sistema5_por_id(item_id, tamanho_final=13):
     WHERE id = ?
     """, (novo_codigo, item_id))
 
-    conn.commit()
+    commit_seguro()
     return True, f"Código corrigido: {codigo_atual} → {novo_codigo}"
 
 
@@ -3876,7 +3891,7 @@ def aplicar_zero_esquerda_certificado_por_id(item_id, tamanho_final=13):
     WHERE id = ?
     """, (novo_codigo, item_id))
 
-    conn.commit()
+    commit_seguro()
     return True, f"Código corrigido: {codigo_atual} → {novo_codigo}"
 
 # ==========================================
@@ -4720,7 +4735,7 @@ if aba2 is not None:
                     try:
                         cursor.execute("DELETE FROM itens WHERE certificado_id = ?", (cert_para_deletar[0],))
                         cursor.execute("DELETE FROM certificados WHERE id = ?", (cert_para_deletar[0],))
-                        conn.commit()
+                        commit_seguro()
                         st.success(f"Certificado {cert_para_deletar[1]} e seus itens foram removidos com sucesso ✅")
                     except Exception as e:
                         st.error(f"Erro ao remover: {e}")
@@ -5102,7 +5117,7 @@ if aba3 is not None:
                         "DELETE FROM registros WHERE UPPER(cliente_base) = UPPER(?)",
                         (base_excluir,)
                     )
-                    conn.commit()
+                    commit_seguro()
                     st.success(f"Todos os registros de **{base_excluir}** foram excluídos ✅")
                     st.rerun()
                 except Exception as e:
@@ -5652,7 +5667,8 @@ if aba6 is not None:
                         item["substituir"] = False
 
                     st.caption("Prévia (primeiros 10 itens):")
-                    st.dataframe(normalizar_df_para_exibicao(item["df"].head)(10), width='stretch')
+                    _df_preview = item["df"].head(10) if item["df"] is not None and not item["df"].empty else None
+                    st.dataframe(normalizar_df_para_exibicao(_df_preview), width='stretch')
                     if len(item["df"]) > 10:
                         st.caption(f"... e mais {len(item['df']) - 10} item(ns)")
 
@@ -5847,10 +5863,24 @@ if aba6 is not None:
                                         key=f"btn_del_fab_{_key_fab_del}"
                                     ):
                                         try:
-                                            ids_fab = bloco_fabrica["arquivo_id"].tolist()
-                                            total_del_itens = 0
-                                            for aid in ids_fab:
-                                                total_del_itens += deletar_processo_sistema5(int(aid))
+                                            ids_fab = [int(aid) for aid in bloco_fabrica["arquivo_id"].tolist()]
+
+                                            # Delete em batch — um único commit no final
+                                            placeholders = ",".join("?" * len(ids_fab))
+                                            total_del_itens = cursor.execute(
+                                                f"SELECT COUNT(*) FROM sistema5_itens WHERE arquivo_id IN ({placeholders})",
+                                                ids_fab
+                                            ).fetchone()[0]
+                                            cursor.execute(
+                                                f"DELETE FROM sistema5_itens WHERE arquivo_id IN ({placeholders})",
+                                                ids_fab
+                                            )
+                                            cursor.execute(
+                                                f"DELETE FROM sistema5_arquivos WHERE id IN ({placeholders})",
+                                                ids_fab
+                                            )
+                                            commit_seguro()
+
                                             st.success(
                                                 f"✅ {len(ids_fab)} processo(s) e {total_del_itens} itens de "
                                                 f"**{fabrica}** excluídos com sucesso."
@@ -5858,6 +5888,7 @@ if aba6 is not None:
                                             st.cache_data.clear()
                                             st.rerun()
                                         except Exception as e:
+                                            st.error(f"Erro ao excluir: {e}")
                                             st.error(f"Erro ao excluir: {e}")
 
         st.download_button(
