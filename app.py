@@ -225,13 +225,13 @@ commit_seguro()
 try:
     cursor.execute("ALTER TABLE sistema5_itens ADD COLUMN modelo_ref_key TEXT")
     commit_seguro()
-except sqlite3.OperationalError:
+except (sqlite3.OperationalError, sqlite3.DatabaseError):
     pass
 
 try:
     cursor.execute("ALTER TABLE itens ADD COLUMN modelo_ref_key TEXT")
     commit_seguro()
-except sqlite3.OperationalError:
+except (sqlite3.OperationalError, sqlite3.DatabaseError):
     pass
 
 # Índices para performance em buscas por campo mais usados
@@ -935,7 +935,7 @@ def garantir_estrutura_banco():
         try:
             cursor.execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {tipo}")
             commit_seguro()
-        except sqlite3.OperationalError:
+        except (sqlite3.OperationalError, sqlite3.DatabaseError):
             pass
 
     try:
