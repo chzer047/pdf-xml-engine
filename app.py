@@ -292,6 +292,8 @@ def modelo_corresponde_referencia_exata(modelo_banco, ref_busca):
     Aceita:
     BAL-17-FAN-PR == BAL-17-FAN-PR
     BAL-17-FAN-PR == BAL-17-FAN-PR - DESCRIÇÃO
+    0158 == 0158 - BRINQUEDO...
+    HK0158 == HK0158 - BRINQUEDO...
 
     Rejeita:
     SK-126 != SK-1261
@@ -300,7 +302,7 @@ def modelo_corresponde_referencia_exata(modelo_banco, ref_busca):
     """
 
     modelo = normalizar_hifens_ref(modelo_banco)
-    ref = normalizar_hifens_ref(ref_busca)
+    ref    = normalizar_hifens_ref(ref_busca)
 
     if not modelo or not ref:
         return False
@@ -316,9 +318,9 @@ def modelo_corresponde_referencia_exata(modelo_banco, ref_busca):
     if not resto:
         return True
 
-    # Aceita apenas quando depois da referência existe separador de descrição.
-    # Ex: " - BRINQUEDO" ou "- BRINQUEDO".
-    if re.match(r"^\s*-\s+.+", resto):
+    # Aceita quando depois da referência existe separador de descrição.
+    # Ex: "-BRINQUEDO", " - BRINQUEDO", "- BRINQUEDO"
+    if re.match(r"^-+\S.*", resto) or re.match(r"^\s*-\s*\S.*", resto):
         return True
 
     return False
@@ -2913,7 +2915,10 @@ def buscar_item_sistema5_confirmacao(valor_ref):
         return None
 
     ref_key = referencia_chave_exata(ref)
+    # Também tenta sem zeros à esquerda para casos onde o banco não preservou
+    ref_sem_zero = ref.lstrip("0") or ref
 
+    # 1. Busca por modelo_ref_key exato
     resultado = pd.read_sql_query("""
     SELECT
         marca AS MARCA,
@@ -2937,6 +2942,7 @@ def buscar_item_sistema5_confirmacao(valor_ref):
     """, conn, params=(ref_key,))
 
     if resultado.empty:
+        # 2. Busca por LIKE — começa com ref, contém ref, ou contém ref sem zeros
         candidatos = pd.read_sql_query("""
         SELECT
             marca AS MARCA,
@@ -2955,9 +2961,11 @@ def buscar_item_sistema5_confirmacao(valor_ref):
             id AS ID_SISTEMA5
         FROM sistema5_itens
         WHERE UPPER(modelo) LIKE UPPER(?)
+           OR UPPER(modelo) LIKE UPPER(?)
+           OR UPPER(modelo) LIKE UPPER(?)
         ORDER BY COALESCE(data_processo, '1900-01-01') DESC, id DESC
         LIMIT 100
-        """, conn, params=(f"{ref}%",))
+        """, conn, params=(f"{ref}%", f"{ref_sem_zero}%", f"%-{ref_sem_zero} %"))
         resultado = filtrar_resultado_por_referencia_exata(candidatos, ref)
 
     if resultado.empty:
