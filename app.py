@@ -396,6 +396,38 @@ def codigo_barras_para_texto(valor, number_format=None):
 
 
 
+def ler_valor_celula_preservando_zeros(cell):
+    """
+    Lê o valor de uma célula preservando zeros à esquerda.
+    Quando o Excel armazena '0199' como número 199, o number_format
+    da célula (ex: '0000') indica quantos dígitos deveria ter.
+    """
+    valor = cell.value
+    if valor is None:
+        return ""
+
+    texto = str(valor).strip()
+
+    # Remove .0 de floats
+    if re.fullmatch(r"\d+\.0", texto):
+        texto = texto[:-2]
+
+    if not texto or texto.lower() in ["nan", "none", "null"]:
+        return ""
+
+    # Se for numérico e tiver number_format com zeros, restaura zeros à esquerda
+    if str(valor).replace(".", "").isdigit():
+        fmt = str(cell.number_format) if cell.number_format else ""
+        # Formato tipo "0000" ou "00000" indica quantidade de dígitos
+        blocos = re.findall(r"0{2,}", fmt)
+        if blocos:
+            tamanho = max(len(b) for b in blocos)
+            if len(texto) < tamanho:
+                texto = texto.zfill(tamanho)
+
+    return texto.strip()
+
+
 def referencia_chave_exata(valor):
     texto = normalizar_hifens_ref(valor) if "normalizar_hifens_ref" in globals() else clean(valor).upper()
     return texto.strip()
@@ -1836,7 +1868,9 @@ def preencher_excel_confirmacao(uploaded_file):
             # Qualquer célula verde da linha é considerada referência.
             for cell in row:
                 if eh_verde(cell) and clean(cell.value):
-                    refs.append(clean(cell.value))
+                    val = ler_valor_celula_preservando_zeros(cell)
+                    if val:
+                        refs.append(val)
 
             if not refs:
                 continue
