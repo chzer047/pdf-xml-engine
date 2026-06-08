@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: c-xml-br-engine
+    runtime: docker
+    plan: free
+    branch: TESTE-COM-CLAUDE
+    healthCheckPath: /
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
