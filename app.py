@@ -5401,12 +5401,56 @@ with aba6:
     st.divider()
     st.subheader("Enviar Excel(s) de processo")
 
-    arquivos_s5 = st.file_uploader(
-        "Envie um ou mais Excels com IP no nome",
-        type=["xlsx", "xls"],
-        accept_multiple_files=True,
-        key="s5_excel_multi"
+    modo_upload = st.radio(
+        "Modo de envio",
+        ["📄 Excels individuais", "🗜️ ZIP com vários processos"],
+        horizontal=True,
+        key="s5_modo_upload"
     )
+
+    if modo_upload == "🗜️ ZIP com vários processos":
+        zip_upload = st.file_uploader(
+            "Envie o ZIP contendo os Excels (com IP no nome)",
+            type=["zip"],
+            key="s5_zip_upload"
+        )
+
+        arquivos_s5 = []
+
+        if zip_upload:
+            try:
+                import zipfile as zipfile_mod
+                from io import BytesIO
+
+                with zipfile_mod.ZipFile(zip_upload, "r") as zf:
+                    nomes = [
+                        n for n in zf.namelist()
+                        if n.lower().endswith((".xlsx", ".xls"))
+                        and not n.startswith("__MACOSX")
+                        and not "/." in n
+                    ]
+
+                    if not nomes:
+                        st.error("Nenhum arquivo Excel encontrado dentro do ZIP.")
+                    else:
+                        st.info(f"📦 {len(nomes)} Excel(s) encontrado(s) no ZIP.")
+                        for nome in nomes:
+                            dados = zf.read(nome)
+                            nome_base = nome.split("/")[-1]  # remove subpastas
+                            buf = BytesIO(dados)
+                            buf.name = nome_base
+                            buf.size = len(dados)
+                            arquivos_s5.append(buf)
+
+            except Exception as e:
+                st.error(f"Erro ao abrir ZIP: {e}")
+    else:
+        arquivos_s5 = st.file_uploader(
+            "Envie um ou mais Excels com IP no nome",
+            type=["xlsx", "xls"],
+            accept_multiple_files=True,
+            key="s5_excel_multi"
+        )
 
     if arquivos_s5:
         # Validação de tamanho total — Streamlit Cloud rejeita lotes muito grandes
