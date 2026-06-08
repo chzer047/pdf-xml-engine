@@ -61,7 +61,7 @@ def tela_login():
         usuario = st.text_input("Usuário", key="login_usuario").strip().lower()
         senha   = st.text_input("Senha", type="password", key="login_senha")
 
-        if st.button("Entrar", key="login_btn", type="primary", width='stretch'):
+        if st.button("Entrar", key="login_btn", type="primary"):
             usuarios = carregar_usuarios()
 
             if not usuarios:
@@ -4180,7 +4180,7 @@ with aba1:
 
             st.dataframe(
                 df,
-                width='stretch'
+                use_container_width=True
             )
 
             st.info(
@@ -4204,13 +4204,13 @@ REV: {dados_certificado['rev']}
                 st.warning("Nenhum registro vinculado encontrado para este CE-BRI + FAMÍLIA.")
             else:
                 st.success("Registro vinculado encontrado ✅")
-                st.dataframe(normalizar_df_para_exibicao(registro_vinculado), width='stretch')
+                st.dataframe(normalizar_df_para_exibicao(registro_vinculado), use_container_width=True)
 
             duplicados = verificar_codigos_duplicados(df)
 
             if not duplicados.empty:
                 st.warning("Foram encontrados códigos duplicados neste PDF.")
-                st.dataframe(normalizar_df_para_exibicao(duplicados), width='stretch')
+                st.dataframe(normalizar_df_para_exibicao(duplicados), use_container_width=True)
 
             if not dados_certificado["ip_bri"]:
                 st.warning("⚠️ IP-BRI não encontrado neste PDF. O XML foi gerado, mas o certificado **não foi salvo no banco**.")
@@ -4379,7 +4379,7 @@ if aba2 is not None:
                 st.warning("Nenhum registro vinculado encontrado para este CE-BRI + FAMÍLIA.")
             else:
                 st.success("Registro vinculado encontrado ✅")
-                st.dataframe(normalizar_df_para_exibicao(registro_vinculado), width='stretch')
+                st.dataframe(normalizar_df_para_exibicao(registro_vinculado), use_container_width=True)
 
             if rows:
                 df_preview = pd.DataFrame(
@@ -4393,13 +4393,13 @@ if aba2 is not None:
                     ]
                 )
 
-                st.dataframe(normalizar_df_para_exibicao(df_preview), width='stretch')
+                st.dataframe(normalizar_df_para_exibicao(df_preview), use_container_width=True)
 
                 duplicados = verificar_codigos_duplicados(df_preview)
 
                 if not duplicados.empty:
                     st.warning("Foram encontrados códigos duplicados.")
-                    st.dataframe(normalizar_df_para_exibicao(duplicados), width='stretch')
+                    st.dataframe(normalizar_df_para_exibicao(duplicados), use_container_width=True)
 
                 if st.button("Salvar / Atualizar banco"):
                     status, mensagem = salvar_ou_atualizar_certificado(
@@ -4462,7 +4462,7 @@ if aba2 is not None:
             st.warning("Nenhum item encontrado.")
         else:
             st.success("Item encontrado ✅")
-            st.dataframe(normalizar_df_para_exibicao(resultado_item), width='stretch')
+            st.dataframe(normalizar_df_para_exibicao(resultado_item), use_container_width=True)
 
             st.download_button(
                 "Baixar resultado da pesquisa em CSV",
@@ -4515,7 +4515,7 @@ if aba2 is not None:
             st.success("Nenhum item repetido encontrado ✅")
         else:
             st.warning("Itens repetidos encontrados.")
-            st.dataframe(normalizar_df_para_exibicao(itens_repetidos), width='stretch')
+            st.dataframe(normalizar_df_para_exibicao(itens_repetidos), use_container_width=True)
 
             st.download_button(
                 "Baixar itens repetidos em CSV",
@@ -4573,7 +4573,7 @@ if aba2 is not None:
         ORDER BY i.modelo, c.ip_bri
         """, conn, params=(marca_filtro,))
 
-        st.dataframe(normalizar_df_para_exibicao(resultado_marca), width='stretch')
+        st.dataframe(normalizar_df_para_exibicao(resultado_marca), use_container_width=True)
 
         st.download_button(
             "Baixar CSV da marca",
@@ -4832,7 +4832,7 @@ if aba3 is not None:
 
                 st.dataframe(
                     df_filtrado,
-                    width='stretch'
+                    use_container_width=True
                 )
 
                 todas_fabricas.append(df_filtrado)
@@ -4849,7 +4849,7 @@ if aba3 is not None:
 
                 st.dataframe(
                     banco_registros,
-                    width='stretch'
+                    use_container_width=True
                 )
 
                 if st.button("Salvar registros desta base", key="salvar_registros_base"):
@@ -4988,7 +4988,7 @@ if aba3 is not None:
                         "ce_bri",
                         "endereco_fabrica"
                     ]],
-                    width='stretch'
+                    use_container_width=True
                 )
 
                 st.download_button(
@@ -5148,7 +5148,7 @@ with aba4:
 
             if candidatos_diag is not None and not candidatos_diag.empty:
                 st.info("Candidatos encontrados no Sistema 5:")
-                st.dataframe(normalizar_df_para_exibicao(candidatos_diag), width='stretch')
+                st.dataframe(normalizar_df_para_exibicao(candidatos_diag), use_container_width=True)
             else:
                 st.error("Nenhum candidato encontrado no Sistema 5 pela busca bruta.")
 
@@ -5207,7 +5207,7 @@ with aba4:
                 st.warning("Algumas referências verdes não foram encontradas no banco.")
                 st.dataframe(
                     pd.DataFrame({"referencia_nao_encontrada": sorted(set(nao_encontrados))}),
-                    width='stretch'
+                    use_container_width=True
                 )
 
             st.download_button(
@@ -5260,7 +5260,7 @@ if aba5 is not None:
                 st.warning("Nenhum registro encontrado para este IP-BRI.")
             else:
                 st.success(f"{len(resultado_ip)} resultado(s) encontrado(s) ✅")
-                st.dataframe(normalizar_df_para_exibicao(resultado_ip), width='stretch')
+                st.dataframe(normalizar_df_para_exibicao(resultado_ip), use_container_width=True)
 
                 st.download_button(
                     "Baixar resultado em CSV",
@@ -5287,7 +5287,7 @@ if aba5 is not None:
                 st.warning("Nenhum IP-BRI encontrado para este registro.")
             else:
                 st.success(f"{len(resultado_registro)} resultado(s) encontrado(s) ✅")
-                st.dataframe(normalizar_df_para_exibicao(resultado_registro), width='stretch')
+                st.dataframe(normalizar_df_para_exibicao(resultado_registro), use_container_width=True)
 
                 st.download_button(
                     "Baixar resultado em CSV",
@@ -5331,7 +5331,7 @@ if aba6 is not None:
                 st.warning("Nenhum item encontrado no Sistema 5.")
             else:
                 st.success(f"{len(resultado_global_s5)} item(ns) encontrado(s) no Sistema 5 ✅")
-                st.dataframe(normalizar_df_para_exibicao(resultado_global_s5), width='stretch')
+                st.dataframe(normalizar_df_para_exibicao(resultado_global_s5), use_container_width=True)
 
                 st.download_button(
                     "Baixar resultado Sistema 5 CSV",
@@ -5657,7 +5657,7 @@ if aba6 is not None:
 
                     if tem_dup:
                         st.warning("⚠️ Já existe processo com este IP para esta fábrica:")
-                        st.dataframe(normalizar_df_para_exibicao(item["duplicado"]), width='stretch')
+                        st.dataframe(normalizar_df_para_exibicao(item["duplicado"]), use_container_width=True)
                         item["substituir"] = st.checkbox(
                             "Substituir processo existente ao salvar",
                             value=False,
@@ -5668,7 +5668,7 @@ if aba6 is not None:
 
                     st.caption("Prévia (primeiros 10 itens):")
                     _df_preview = item["df"].head(10) if item["df"] is not None and not item["df"].empty else None
-                    st.dataframe(normalizar_df_para_exibicao(_df_preview), width='stretch')
+                    st.dataframe(normalizar_df_para_exibicao(_df_preview), use_container_width=True)
                     if len(item["df"]) > 10:
                         st.caption(f"... e mais {len(item['df']) - 10} item(ns)")
 
@@ -5817,7 +5817,7 @@ if aba6 is not None:
                                             st.warning("Nenhum item encontrado dentro deste processo.")
                                         else:
                                             st.success(f"{len(itens_do_processo)} item(ns) encontrado(s) neste processo ✅")
-                                            st.dataframe(normalizar_df_para_exibicao(itens_do_processo), width='stretch')
+                                            st.dataframe(normalizar_df_para_exibicao(itens_do_processo), use_container_width=True)
 
                                             st.download_button(
                                                 "Baixar itens deste processo CSV",
@@ -5922,7 +5922,7 @@ if aba7 is not None:
         st.success("Nenhuma família pendente de IP-BRI encontrada ✅")
     else:
         st.warning(f"{len(pendentes_ip_bri)} família(s) pendente(s) de IP-BRI.")
-        st.dataframe(normalizar_df_para_exibicao(pendentes_ip_bri), width='stretch')
+        st.dataframe(normalizar_df_para_exibicao(pendentes_ip_bri), use_container_width=True)
 
         st.download_button(
             "Baixar pendentes CSV",
@@ -6022,7 +6022,7 @@ if aba7 is not None:
     if manuais.empty:
         st.info("Nenhum IP-BRI manual cadastrado ainda.")
     else:
-        st.dataframe(normalizar_df_para_exibicao(manuais), width='stretch')
+        st.dataframe(normalizar_df_para_exibicao(manuais), use_container_width=True)
 
         st.download_button(
             "Baixar IP-BRI manuais CSV",
@@ -6146,7 +6146,7 @@ if aba8 is not None:
     if df_fabricas.empty:
         st.info("Nenhuma fábrica encontrada.")
     else:
-        st.dataframe(normalizar_df_para_exibicao(df_fabricas), width='stretch')
+        st.dataframe(normalizar_df_para_exibicao(df_fabricas), use_container_width=True)
 
         st.download_button(
             "Baixar resumo por fábrica CSV",
@@ -6189,7 +6189,7 @@ if aba8 is not None:
         if df_familias.empty:
             st.warning("Nenhuma família encontrada para os filtros selecionados.")
         else:
-            st.dataframe(normalizar_df_para_exibicao(df_familias), width='stretch')
+            st.dataframe(normalizar_df_para_exibicao(df_familias), use_container_width=True)
 
             st.download_button(
                 "Baixar detalhamento por família CSV",
@@ -6233,7 +6233,7 @@ if aba8 is not None:
                 st.info("Essa família não possui itens no Sistema 5.")
             else:
                 st.success(f"{len(df_itens_fam)} item(ns) encontrado(s) nesta família.")
-                st.dataframe(normalizar_df_para_exibicao(df_itens_fam), width='stretch')
+                st.dataframe(normalizar_df_para_exibicao(df_itens_fam), use_container_width=True)
 
                 st.download_button(
                     "Baixar itens da família CSV",
@@ -6266,7 +6266,7 @@ if aba9 is not None:
         st.success("Nenhum código suspeito encontrado no Sistema 5 ✅")
     else:
         st.warning(f"{len(suspeitos_s5)} código(s) suspeito(s) no Sistema 5.")
-        st.dataframe(normalizar_df_para_exibicao(suspeitos_s5), width='stretch')
+        st.dataframe(normalizar_df_para_exibicao(suspeitos_s5), use_container_width=True)
 
         st.download_button(
             "Baixar suspeitos Sistema 5 CSV",
@@ -6352,7 +6352,7 @@ if aba9 is not None:
         st.success("Nenhum código suspeito encontrado nos certificados oficiais ✅")
     else:
         st.warning(f"{len(suspeitos_cert)} código(s) suspeito(s) nos certificados oficiais.")
-        st.dataframe(normalizar_df_para_exibicao(suspeitos_cert), width='stretch')
+        st.dataframe(normalizar_df_para_exibicao(suspeitos_cert), use_container_width=True)
 
         st.download_button(
             "Baixar suspeitos Certificados CSV",
