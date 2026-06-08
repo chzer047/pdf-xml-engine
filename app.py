@@ -399,33 +399,30 @@ def codigo_barras_para_texto(valor, number_format=None):
 def ler_valor_celula_preservando_zeros(cell):
     """
     Lê o valor de uma célula preservando zeros à esquerda.
-    Quando o Excel armazena '0199' como número 199, o number_format
-    da célula (ex: '0000') indica quantos dígitos deveria ter.
+    Se a célula tem valor texto, usa diretamente.
+    Se tem valor numérico, converte para inteiro (remove .0) sem alterar dígitos.
+    Não tenta "adivinhar" zeros perdidos — deixa a busca ser flexível.
     """
     valor = cell.value
     if valor is None:
         return ""
 
-    texto = str(valor).strip()
+    # Se já é string, usa direto (preserva "0156" como está)
+    if isinstance(valor, str):
+        texto = valor.strip()
+        if texto.lower() in ["nan", "none", "null", ""]:
+            return ""
+        return texto
 
-    # Remove .0 de floats
+    # Se é número, converte sem .0
+    texto = str(valor).strip()
     if re.fullmatch(r"\d+\.0", texto):
         texto = texto[:-2]
 
     if not texto or texto.lower() in ["nan", "none", "null"]:
         return ""
 
-    # Se for numérico e tiver number_format com zeros, restaura zeros à esquerda
-    if str(valor).replace(".", "").isdigit():
-        fmt = str(cell.number_format) if cell.number_format else ""
-        # Formato tipo "0000" ou "00000" indica quantidade de dígitos
-        blocos = re.findall(r"0{2,}", fmt)
-        if blocos:
-            tamanho = max(len(b) for b in blocos)
-            if len(texto) < tamanho:
-                texto = texto.zfill(tamanho)
-
-    return texto.strip()
+    return texto
 
 
 def referencia_chave_exata(valor):
