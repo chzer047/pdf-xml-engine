@@ -221,18 +221,28 @@ CREATE TABLE IF NOT EXISTS ip_bri_familias (
 commit_seguro()
 
 
-# Garante colunas novas antes de criar índices em bancos antigos
-try:
-    cursor.execute("ALTER TABLE sistema5_itens ADD COLUMN modelo_ref_key TEXT")
-    commit_seguro()
-except (sqlite3.OperationalError, sqlite3.DatabaseError):
-    pass
+def coluna_existe(tabela, coluna):
+    """Verifica se uma coluna já existe na tabela antes de tentar ALTER TABLE."""
+    try:
+        info = cursor.execute(f"PRAGMA table_info({tabela})").fetchall()
+        return any(row[1] == coluna for row in info)
+    except Exception:
+        return True  # assume que existe para não tentar adicionar
 
-try:
-    cursor.execute("ALTER TABLE itens ADD COLUMN modelo_ref_key TEXT")
-    commit_seguro()
-except (sqlite3.OperationalError, sqlite3.DatabaseError):
-    pass
+# Garante colunas novas antes de criar índices em bancos antigos
+if not coluna_existe("sistema5_itens", "modelo_ref_key"):
+    try:
+        cursor.execute("ALTER TABLE sistema5_itens ADD COLUMN modelo_ref_key TEXT")
+        commit_seguro()
+    except Exception:
+        pass
+
+if not coluna_existe("itens", "modelo_ref_key"):
+    try:
+        cursor.execute("ALTER TABLE itens ADD COLUMN modelo_ref_key TEXT")
+        commit_seguro()
+    except Exception:
+        pass
 
 # Índices para performance em buscas por campo mais usados
 cursor.execute("CREATE INDEX IF NOT EXISTS idx_itens_codigo ON itens(codigo)")
@@ -935,7 +945,7 @@ def garantir_estrutura_banco():
         try:
             cursor.execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {tipo}")
             commit_seguro()
-        except (sqlite3.OperationalError, sqlite3.DatabaseError):
+        except Exception:
             pass
 
     try:
