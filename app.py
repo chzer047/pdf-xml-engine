@@ -1854,7 +1854,34 @@ def descobrir_cabecalho_coluna(ws, row_idx, col_idx):
 
 
 def preencher_excel_confirmacao(uploaded_file):
-    wb = load_workbook(uploaded_file)
+    # Tenta abrir normalmente
+    try:
+        uploaded_file.seek(0)
+    except Exception:
+        pass
+
+    try:
+        wb = load_workbook(uploaded_file)
+    except Exception as e:
+        erro_str = str(e).lower()
+        if any(x in erro_str for x in ["mpo", "image", "picture", "drawing", "wmf", "emf"]):
+            # Remove imagens problemáticas do ZIP e reabre
+            try:
+                uploaded_file.seek(0)
+                import zipfile as _zf
+                buf_limpo = BytesIO()
+                with _zf.ZipFile(uploaded_file, "r") as zin:
+                    with _zf.ZipFile(buf_limpo, "w", _zf.ZIP_DEFLATED) as zout:
+                        for item in zin.infolist():
+                            if any(item.filename.lower().endswith(ext) for ext in [".mpo", ".emf", ".wmf"]):
+                                continue
+                            zout.writestr(item, zin.read(item.filename))
+                buf_limpo.seek(0)
+                wb = load_workbook(buf_limpo)
+            except Exception as e2:
+                raise Exception(f"Não foi possível abrir o Excel mesmo após remover imagens: {e2}")
+        else:
+            raise
 
     preenchidos = 0
     nao_encontrados = []
