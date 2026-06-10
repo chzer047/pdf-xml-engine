@@ -1853,8 +1853,60 @@ def descobrir_cabecalho_coluna(ws, row_idx, col_idx):
 
 
 
+def _limpar_excel_imagens(uploaded_file):
+    """
+    Remove arquivos de imagem problemáticos do Excel (ZIP)
+    e retorna um BytesIO limpo para ser aberto pelo openpyxl.
+    Remove também referências a imagens nos XMLs de drawing.
+    """
+    try:
+        uploaded_file.seek(0)
+    except Exception:
+        pass
+
+    data = uploaded_file.read()
+    import zipfile as _zf
+
+    buf_limpo = BytesIO()
+    extensoes_problematicas = {".mpo", ".emf", ".wmf"}
+    arquivos_removidos = set()
+
+    with _zf.ZipFile(BytesIO(data), "r") as zin:
+        with _zf.ZipFile(buf_limpo, "w", _zf.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                nome_lower = item.filename.lower()
+                ext = "." + nome_lower.split(".")[-1] if "." in nome_lower else ""
+
+                if ext in extensoes_problematicas:
+                    arquivos_removidos.add(item.filename)
+                    continue
+
+                conteudo = zin.read(item.filename)
+
+                # Se é um XML de drawing, remove referências às imagens removidas
+                if "drawing" in nome_lower and nome_lower.endswith(".xml") and arquivos_removidos:
+                    try:
+                        import re as _re
+                        texto = conteudo.decode("utf-8", errors="replace")
+                        for arq in arquivos_removidos:
+                            nome_base = arq.split("/")[-1]
+                            texto = _re.sub(
+                                rf'<[^>]*{_re.escape(nome_base)}[^>]*/?>',
+                                '',
+                                texto
+                            )
+                        conteudo = texto.encode("utf-8")
+                    except Exception:
+                        pass
+
+                zout.writestr(item, conteudo)
+
+    buf_limpo.seek(0)
+    return buf_limpo
+
+
 def preencher_excel_confirmacao(uploaded_file):
-    # Tenta abrir normalmente
+    # Tenta abrir normalmente primeiro
     try:
         uploaded_file.seek(0)
     except Exception:
@@ -1863,25 +1915,11 @@ def preencher_excel_confirmacao(uploaded_file):
     try:
         wb = load_workbook(uploaded_file)
     except Exception as e:
-        erro_str = str(e).lower()
-        if any(x in erro_str for x in ["mpo", "image", "picture", "drawing", "wmf", "emf"]):
-            # Remove imagens problemáticas do ZIP e reabre
-            try:
-                uploaded_file.seek(0)
-                import zipfile as _zf
-                buf_limpo = BytesIO()
-                with _zf.ZipFile(uploaded_file, "r") as zin:
-                    with _zf.ZipFile(buf_limpo, "w", _zf.ZIP_DEFLATED) as zout:
-                        for item in zin.infolist():
-                            if any(item.filename.lower().endswith(ext) for ext in [".mpo", ".emf", ".wmf"]):
-                                continue
-                            zout.writestr(item, zin.read(item.filename))
-                buf_limpo.seek(0)
-                wb = load_workbook(buf_limpo)
-            except Exception as e2:
-                raise Exception(f"Não foi possível abrir o Excel mesmo após remover imagens: {e2}")
-        else:
-            raise
+        # Qualquer erro de imagem/drawing — limpa e tenta de novo
+        try:
+            wb = load_workbook(_limpar_excel_imagens(uploaded_file))
+        except Exception as e2:
+            raise Exception(f"Erro ao abrir Excel: {e2}")
 
     preenchidos = 0
     nao_encontrados = []
@@ -2522,30 +2560,12 @@ def ler_excel_inclusao_sistema5(uploaded_file):
         pass
 
     try:
-        # keep_vba=False e rich_text=False reduzem chance de erro em arquivos complexos
         wb = load_workbook(uploaded_file, data_only=True)
     except Exception as e:
         erro_str = str(e).lower()
-        # Tenta segunda vez ignorando conteúdo de imagem corrompido
-        if "mpo" in erro_str or "image" in erro_str or "picture" in erro_str or "drawing" in erro_str:
+        if any(x in erro_str for x in ["mpo", "image", "picture", "drawing", "wmf", "emf"]):
             try:
-                uploaded_file.seek(0)
-                # Carrega sem validação de imagens via zipfile manual
-                import zipfile, shutil, os
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    zip_path = os.path.join(tmpdir, "original.xlsx")
-                    with open(zip_path, "wb") as f:
-                        f.write(uploaded_file.read())
-                    # Remove arquivos de imagem problemáticos do zip
-                    clean_path = os.path.join(tmpdir, "clean.xlsx")
-                    with zipfile.ZipFile(zip_path, "r") as zin:
-                        with zipfile.ZipFile(clean_path, "w", zipfile.ZIP_DEFLATED) as zout:
-                            for item in zin.infolist():
-                                # Pula arquivos de imagem .mpo e similares
-                                if any(item.filename.lower().endswith(ext) for ext in [".mpo", ".emf", ".wmf"]):
-                                    continue
-                                zout.writestr(item, zin.read(item.filename))
-                    wb = load_workbook(clean_path, data_only=True)
+                wb = load_workbook(_limpar_excel_imagens(uploaded_file), data_only=True)
             except Exception:
                 return pd.DataFrame()
         else:
