@@ -82,7 +82,7 @@ ABREV_OPEN = {
 # ─────────────────────────────────────────────
 
 def aplicar_abreviacoes_drem(nome):
-    resultado = nome.upper()
+    resultado = normalizar_para_iso(nome).upper()
     if len(resultado) <= 200:
         return resultado
     for original, abrev in ABREV_DREM_COMPOSTOS:
@@ -96,7 +96,7 @@ def aplicar_abreviacoes_drem(nome):
 
 
 def aplicar_abreviacoes_open(nome):
-    resultado = nome.upper()
+    resultado = normalizar_para_iso(nome).upper()
     if len(resultado) <= 200:
         return resultado
     for palavra, abrev in ABREV_OPEN.items():
@@ -124,6 +124,24 @@ def corrigir_texto(texto):
 
 def escape_xml(texto):
     return str(texto).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def normalizar_para_iso(texto):
+    # Mapeia caracteres Unicode fora do ISO-8859-1 para equivalentes compatíveis
+    mapa = {
+        '–': '-',    # en dash (–)
+        '—': '-',    # em dash (—)
+        '‘': "'",    # aspas simples esquerdas
+        '’': "'",    # aspas simples direitas
+        '“': '"',    # aspas duplas esquerdas
+        '”': '"',    # aspas duplas direitas
+        '…': '...',  # reticências (…)
+        ' ': ' ',    # espaço não-quebrável
+        '­': '-',    # hífen suave
+    }
+    for char, repl in mapa.items():
+        texto = texto.replace(char, repl)
+    return texto
 
 
 def extrair_codigo_unico(codigo_raw):
@@ -165,9 +183,9 @@ def gerar_xml(items, sufixo, fn_abrev):
 def criar_zip_tres(xml_virgula, xml_ponto, xml_sem, prefixo):
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zipf:
-        zipf.writestr(f"{prefixo}_virgula.xml", xml_virgula.encode("ISO-8859-1", errors="replace"))
-        zipf.writestr(f"{prefixo}_ponto.xml",   xml_ponto.encode("ISO-8859-1",   errors="replace"))
-        zipf.writestr(f"{prefixo}_sem.xml",     xml_sem.encode("ISO-8859-1",     errors="replace"))
+        zipf.writestr(f"{prefixo}_virgula.xml", normalizar_para_iso(xml_virgula).encode("ISO-8859-1", errors="replace"))
+        zipf.writestr(f"{prefixo}_ponto.xml",   normalizar_para_iso(xml_ponto).encode("ISO-8859-1",   errors="replace"))
+        zipf.writestr(f"{prefixo}_sem.xml",     normalizar_para_iso(xml_sem).encode("ISO-8859-1",     errors="replace"))
     buf.seek(0)
     return buf
 
