@@ -225,76 +225,42 @@ st.markdown("---")
 
 if "XML Rápido" in modo:
     st.subheader("⚡ XML Rápido — Certificados Drem")
-    st.caption("Adicione os itens manualmente e gere o XML com as regras INNAC.")
+    st.caption("Envie o PDF e o sistema extrairá e converterá os dados com as regras Drem.")
 
-    if "itens_drem" not in st.session_state:
-        st.session_state.itens_drem = []
+    uploaded_file_drem = st.file_uploader("Envie o PDF do certificado Drem", type="pdf", key="uploader_drem")
 
-    with st.form("form_adicionar", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            marca = st.text_input("Marca", placeholder="Ex: INTELBRAS")
-            modelo = st.text_input("Modelo", placeholder="Ex: IWA 3001")
-        with col2:
-            nome = st.text_input("Nome do Produto", placeholder="Ex: PONTO DE ACESSO WIRELESS")
-            codigo = st.text_input("Código de Barras", placeholder="Ex: 12345678901234")
+    if uploaded_file_drem:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pdf_path = Path(tmpdir) / uploaded_file_drem.name
+            pdf_path.write_bytes(uploaded_file_drem.read())
 
-        adicionar = st.form_submit_button("➕ Adicionar Item", use_container_width=True)
+            with st.spinner("Lendo e processando o PDF..."):
+                rows = parse_pdf(pdf_path)
 
-    if adicionar:
-        if marca and modelo and nome and codigo:
-            codigo_limpo = extrair_codigo_unico(codigo)
-            if codigo_limpo:
-                st.session_state.itens_drem.append({
-                    'marca': marca.upper().strip(),
-                    'modelo': modelo.upper().strip(),
-                    'nome': nome.upper().strip(),
-                    'codigo': codigo_limpo
-                })
-                st.success(f"Item adicionado! Total: {len(st.session_state.itens_drem)}")
-            else:
-                st.error("Código inválido. Deve conter entre 8 e 14 dígitos numéricos.")
-        else:
-            st.warning("Preencha todos os campos antes de adicionar.")
+            if not rows:
+                st.error("Nenhum item válido encontrado no PDF. Verifique se o formato está correto.")
+                st.stop()
 
-    if st.session_state.itens_drem:
-        st.markdown(f"**{len(st.session_state.itens_drem)} item(s) na lista:**")
+            df = pd.DataFrame(rows)
+            df_exibir = df[['ordem', 'marca', 'modelo', 'nome', 'codigo']].copy()
+            df_exibir.columns = ['Ordem', 'Marca', 'Modelo', 'Nome', 'Código']
 
-        df_preview = pd.DataFrame(st.session_state.itens_drem)
-        df_preview.index = range(1, len(df_preview) + 1)
-        st.dataframe(
-            df_preview[['marca', 'modelo', 'nome', 'codigo']],
-            use_container_width=True,
-            column_config={
-                "marca": "Marca",
-                "modelo": "Modelo",
-                "nome": "Nome",
-                "codigo": "Código"
-            }
-        )
+            st.success(f"{len(rows)} item(s) encontrado(s) ✅")
+            st.dataframe(df_exibir, use_container_width=True)
 
-        col_limpar, col_gerar = st.columns([1, 2])
+            xml_virgula = gerar_xml(rows, ",", aplicar_abreviacoes_drem)
+            xml_ponto   = gerar_xml(rows, ".", aplicar_abreviacoes_drem)
+            zip_buf = criar_zip(xml_virgula, xml_ponto, "drem")
 
-        with col_limpar:
-            if st.button("🗑️ Limpar Lista", use_container_width=True):
-                st.session_state.itens_drem = []
-                st.rerun()
-
-        with col_gerar:
-            if st.button("🚀 Gerar XML", type="primary", use_container_width=True):
-                xml_virgula = gerar_xml(st.session_state.itens_drem, ",", aplicar_abreviacoes_drem)
-                xml_ponto   = gerar_xml(st.session_state.itens_drem, ".", aplicar_abreviacoes_drem)
-                zip_buf = criar_zip(xml_virgula, xml_ponto, "drem")
-
-                st.download_button(
-                    "📥 Baixar XMLs (ZIP)",
-                    zip_buf,
-                    "drem_xmls.zip",
-                    mime="application/zip",
-                    use_container_width=True
-                )
+            st.download_button(
+                "📥 Baixar XMLs (ZIP)",
+                zip_buf,
+                "drem_xmls.zip",
+                mime="application/zip",
+                use_container_width=True
+            )
     else:
-        st.info("Nenhum item adicionado ainda. Use o formulário acima para começar.")
+        st.info("Aguardando o envio do PDF.")
 
 
 # ─── MODO 2: PDF > XML (OPEN) ────────────────────────────────────────────────
