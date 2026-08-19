@@ -18,91 +18,92 @@ st.set_page_config(
 # DICIONÁRIOS DE ABREVIAÇÕES
 # ─────────────────────────────────────────────
 
-# Modo 1: XML Rápido — Certificados Drem
-ABREV_DREM = {
-    "PRODUZIDO": "PROD.",
-    "INDICATIVO": "IND.",
-    "RESTRITIVO": "REST.",
-    "CERTIFICADO": "CERT.",
-    "CERTIFICAÇÃO": "CERT.",
-    "HOMOLOGADO": "HOMOL.",
-    "HOMOLOGAÇÃO": "HOMOL.",
-    "APROVADO": "APROV.",
-    "EQUIPAMENTO": "EQUIP.",
-    "DISPOSITIVO": "DISP.",
-    "COMPONENTE": "COMP.",
-    "MÓDULO": "MOD.",
-    "SISTEMA": "SIST.",
-    "FREQUÊNCIA": "FREQ.",
-    "TRANSMISSOR": "TRANS.",
-    "RECEPTOR": "RECEPT.",
-    "AMPLIFICADOR": "AMP.",
-    "CONTROLADOR": "CTRL.",
-    "PROCESSADOR": "PROC.",
-    "INTERFACE": "INTERF.",
-    "ADAPTADOR": "ADAPT.",
-    "CONVERSOR": "CONV.",
-    "CARREGADOR": "CARR.",
-    "ALIMENTAÇÃO": "ALIM.",
-    "INDUSTRIAL": "IND.",
-    "RESIDENCIAL": "RESID.",
-    "COMERCIAL": "COM.",
-    "PORTÁTIL": "PORT.",
-    "DIGITAL": "DIG.",
-    "ANALÓGICO": "ANAL.",
-    "BLUETOOTH": "BT.",
-    "WIRELESS": "WLS.",
-    "ETHERNET": "ETH.",
+# Modo 1: XML Rápido — Certificados Drem (INNAC)
+# Regra: só aplica se nome > 200 chars
+# Fase 1 — expressões compostas (aplicadas primeiro)
+ABREV_DREM_COMPOSTOS = [
+    ("REVESTIMENTO EXTERNO",            "REV.EXT."),
+    ("DETALHES EM TECIDO BORDADO",      "DET.BORD."),
+    ("FAIXA ETARIA INDICATIVA",         "F.IND."),
+    ("FAIXA ETARIA RESTRITIVA",         "F.REST."),
+    ("COSTURA INDUSTRIAL",              "CST.IND."),
+    ("COSTURA INVISÍVEL",               "CST.INV."),
+    ("COSTURA INVISIVEL",               "CST.INV."),
+    ("FIXAÇÃO DE COMPONENTES",          "FIX.COMP."),
+    ("FIXACAO DE COMPONENTES",          "FIX.COMP."),
+    ("PONTO ESCADA",                    "PT.ESC."),
+    ("TECIDO E METAL",                  "TEC.MET."),
+]
+
+# Fase 2 — palavras individuais (só se ainda > 200 após fase 1)
+ABREV_DREM_INDIVIDUAIS = {
+    "ENCHIMENTO":   "ENCH.",
+    "REVESTIMENTO": "REVEST.",
+    "FAIXA ETARIA": "F.ET.",
+    "INDICATIVA":   "INDIC.",
+    "RESTRITIVA":   "RESTR.",
+    "INDUSTRIAL":   "IND.",
+    "INVISÍVEL":    "INVIS.",
+    "INVISIVEL":    "INVIS.",
+    "COMPONENTES":  "COMP.",
+    "EXTERNO":      "EXT.",
+    "BORDADO":      "BORD.",
+    "COSTURA":      "COST.",
+    "FIXAÇÃO":      "FIX.",
+    "FIXACAO":      "FIX.",
+    "TECIDO":       "TEC.",
 }
 
 # Modo 2: PDF>XML — Certificados Open
+# Regra: só aplica se nome > 200 chars
 ABREV_OPEN = {
-    "PRODUZIDO": "PROD.",
+    "PRODUZIDO":  "PROD.",
     "INDICATIVO": "IND.",
     "RESTRITIVO": "REST.",
-    "CERTIFICADO": "CERT.",
-    "CERTIFICAÇÃO": "CERT.",
-    "HOMOLOGADO": "HOMOL.",
-    "HOMOLOGAÇÃO": "HOMOL.",
-    "APROVADO": "APROV.",
-    "EQUIPAMENTO": "EQUIP.",
-    "DISPOSITIVO": "DISP.",
-    "COMPONENTE": "COMP.",
-    "MÓDULO": "MOD.",
-    "SISTEMA": "SIST.",
-    "FREQUÊNCIA": "FREQ.",
-    "TRANSMISSOR": "TRANS.",
-    "RECEPTOR": "RECEPT.",
-    "AMPLIFICADOR": "AMP.",
-    "CONTROLADOR": "CTRL.",
-    "PROCESSADOR": "PROC.",
-    "INTERFACE": "INTERF.",
-    "ADAPTADOR": "ADAPT.",
-    "INDUSTRIAL": "INDUSTR.",
-    "RESIDENCIAL": "RESID.",
-    "COMERCIAL": "COMERC.",
-    "MICROCOMPUTADOR": "MICROCOMP.",
-    "COMPUTADOR": "COMPUT.",
-    "IMPRESSORA": "IMPR.",
-    "MONITOR": "MONIT.",
-    "TECLADO": "TECL.",
-    "TABLET": "TABL.",
-    "SMARTPHONE": "SMRTPH.",
-    "CELULAR": "CEL.",
-    "TELEFONE": "TEL.",
-    "ROTEADOR": "RTDR.",
-    "MODEM": "MDM.",
-    "NOTEBOOK": "NTB.",
-    "PORTÁTIL": "PORT.",
-    "DIGITAL": "DIG.",
-    "ANALÓGICO": "ANAL.",
-    "BLUETOOTH": "BT.",
-    "WIRELESS": "WLS.",
-    "ETHERNET": "ETH.",
-    "CONVERSOR": "CONV.",
-    "CARREGADOR": "CARR.",
-    "ALIMENTAÇÃO": "ALIM.",
+    "ANOS":       "A",
+    "MESES":      "MES.",
+    "INJEÇÃO":    "INJ.",
+    "INJECAO":    "INJ.",
+    "MÁXIMA":     "MAX.",
+    "MAXIMA":     "MAX.",
+    "PLÁSTICO":   "PLAST.",
+    "PLASTICO":   "PLAST.",
+    "CONTROLE":   "CONT.",
+    "REMOTO":     "REM.",
+    "VELOCIDADE": "VEL.",
+    "MEDIDAS":    "MED.",
 }
+
+# ─────────────────────────────────────────────
+# FUNÇÕES DE ABREVIAÇÃO
+# ─────────────────────────────────────────────
+
+def aplicar_abreviacoes_drem(nome):
+    resultado = nome.upper()
+    if len(resultado) <= 200:
+        return resultado
+    # Fase 1: expressões compostas
+    for original, abrev in ABREV_DREM_COMPOSTOS:
+        resultado = re.sub(re.escape(original), abrev, resultado)
+    # Fase 2: palavras individuais (só se ainda > 200)
+    if len(resultado) > 200:
+        for palavra, abrev in ABREV_DREM_INDIVIDUAIS.items():
+            resultado = re.sub(r'\b' + re.escape(palavra) + r'\b', abrev, resultado)
+    if len(resultado) > 200:
+        resultado = resultado[:200]
+    return resultado
+
+
+def aplicar_abreviacoes_open(nome):
+    resultado = nome.upper()
+    if len(resultado) <= 200:
+        return resultado
+    for palavra, abrev in ABREV_OPEN.items():
+        resultado = re.sub(r'\b' + re.escape(palavra) + r'\b', abrev, resultado)
+    if len(resultado) > 200:
+        resultado = resultado[:200]
+    return resultado
+
 
 # ─────────────────────────────────────────────
 # FUNÇÕES UTILITÁRIAS
@@ -124,15 +125,6 @@ def escape_xml(texto):
     return str(texto).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def aplicar_abreviacoes(nome, dicionario):
-    resultado = nome.upper()
-    for palavra, abrev in dicionario.items():
-        resultado = re.sub(r'\b' + re.escape(palavra) + r'\b', abrev, resultado)
-    if len(resultado) > 200:
-        resultado = resultado[:200]
-    return resultado
-
-
 def extrair_codigo_unico(codigo_raw):
     if not codigo_raw:
         return None
@@ -145,14 +137,14 @@ def extrair_codigo_unico(codigo_raw):
     return codigo
 
 
-def gerar_xml(items, sufixo, dicionario):
+def gerar_xml(items, sufixo, fn_abrev):
     linhas = [
         '<?xml version="1.0" encoding="ISO-8859-1"?>',
         '<ArrayOfItemSolicitacao>'
     ]
     for item in items:
         modelo = item['modelo'].rstrip(".,") + sufixo
-        nome = aplicar_abreviacoes(clean(item['nome']), dicionario)
+        nome = fn_abrev(clean(item['nome']))
         linhas.append(f"""
 <ItemSolicitacao>
 <Marca>{escape_xml(item['marca'])}</Marca>
@@ -233,7 +225,7 @@ st.markdown("---")
 
 if "XML Rápido" in modo:
     st.subheader("⚡ XML Rápido — Certificados Drem")
-    st.caption("Adicione os itens manualmente e gere o XML com as regras Drem.")
+    st.caption("Adicione os itens manualmente e gere o XML com as regras INNAC.")
 
     if "itens_drem" not in st.session_state:
         st.session_state.itens_drem = []
@@ -290,8 +282,8 @@ if "XML Rápido" in modo:
 
         with col_gerar:
             if st.button("🚀 Gerar XML", type="primary", use_container_width=True):
-                xml_virgula = gerar_xml(st.session_state.itens_drem, ",", ABREV_DREM)
-                xml_ponto = gerar_xml(st.session_state.itens_drem, ".", ABREV_DREM)
+                xml_virgula = gerar_xml(st.session_state.itens_drem, ",", aplicar_abreviacoes_drem)
+                xml_ponto   = gerar_xml(st.session_state.itens_drem, ".", aplicar_abreviacoes_drem)
                 zip_buf = criar_zip(xml_virgula, xml_ponto, "drem")
 
                 st.download_button(
@@ -332,8 +324,8 @@ else:
             st.success(f"{len(rows)} item(s) encontrado(s) ✅")
             st.dataframe(df_exibir, use_container_width=True)
 
-            xml_virgula = gerar_xml(rows, ",", ABREV_OPEN)
-            xml_ponto = gerar_xml(rows, ".", ABREV_OPEN)
+            xml_virgula = gerar_xml(rows, ",", aplicar_abreviacoes_open)
+            xml_ponto   = gerar_xml(rows, ".", aplicar_abreviacoes_open)
             zip_buf = criar_zip(xml_virgula, xml_ponto, "open")
 
             st.download_button(
