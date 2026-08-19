@@ -337,3 +337,53 @@ else:
             )
     else:
         st.info("Aguardando o envio do PDF.")
+
+
+# ─── ABREVIADOR DE DESCRIÇÕES ────────────────────────────────────────────────
+
+st.markdown("---")
+st.subheader("✂️ Abreviador de Descrições")
+st.caption("Cole uma descrição, escolha o dicionário e veja o resultado abreviado.")
+
+col_input, col_config = st.columns([3, 1])
+
+with col_config:
+    dicionario_escolhido = st.selectbox(
+        "Dicionário",
+        ["⚡ Drem (INNAC)", "📄 Open"],
+        key="abrev_dict"
+    )
+
+with col_input:
+    descricao_input = st.text_area(
+        "Descrição original",
+        placeholder="Cole aqui a descrição do produto...",
+        height=120,
+        key="abrev_input"
+    )
+
+if st.button("✂️ Abreviar", type="primary", key="btn_abreviar"):
+    if descricao_input.strip():
+        if "Drem" in dicionario_escolhido:
+            resultado = aplicar_abreviacoes_drem(descricao_input.strip())
+            dict_label = "Drem (INNAC)"
+        else:
+            resultado = aplicar_abreviacoes_open(descricao_input.strip())
+            dict_label = "Open"
+
+        original_len = len(descricao_input.strip())
+        resultado_len = len(resultado)
+        abreviou = resultado_len < original_len
+
+        st.markdown(f"**Resultado — dicionário {dict_label}:**")
+        st.code(resultado, language=None)
+
+        col_a, col_b, col_c = st.columns(3)
+        col_a.metric("Original", f"{original_len} chars")
+        col_b.metric("Resultado", f"{resultado_len} chars")
+        col_c.metric("Redução", f"{original_len - resultado_len} chars" if abreviou else "—")
+
+        if not abreviou and original_len <= 200:
+            st.info("Descrição com 200 caracteres ou menos — abreviações não aplicadas.")
+    else:
+        st.warning("Cole uma descrição antes de abreviar.")
