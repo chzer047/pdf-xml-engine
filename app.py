@@ -56,23 +56,25 @@ ABREV_DREM_INDIVIDUAIS = {
 }
 
 # Modo 2: PDF>XML — Certificados Open
-# Regra: só aplica se nome > 200 chars
+# Regra: só aplica se nome > 200 chars — percorre na ordem abaixo
 ABREV_OPEN = {
-    "PRODUZIDO":  "PROD.",
-    "INDICATIVO": "IND.",
-    "RESTRITIVO": "REST.",
-    "ANOS":       "A",
-    "MESES":      "MES.",
-    "INJEÇÃO":    "INJ.",
-    "INJECAO":    "INJ.",
-    "MÁXIMA":     "MAX.",
-    "MAXIMA":     "MAX.",
-    "PLÁSTICO":   "PLAST.",
-    "PLASTICO":   "PLAST.",
-    "CONTROLE":   "CONT.",
-    "REMOTO":     "REM.",
-    "VELOCIDADE": "VEL.",
-    "MEDIDAS":    "MED.",
+    "MECANISMO SIMPLES": "MEC.SIMPL.",  # composta — aplicada antes das individuais
+    "BASICAMENTE":       "BASIC.",
+    "PRODUZIDO":         "PROD.",
+    "INDICATIVO":        "IND.",
+    "RESTRITIVO":        "REST.",
+    "ANOS":              "A",           # \b garante que não casa com ex: 3ANOS
+    "MESES":             "MES.",
+    "INJEÇÃO":           "INJ.",
+    "INJECAO":           "INJ.",
+    "MÁXIMA":            "MAX.",
+    "MAXIMA":            "MAX.",
+    "PLÁSTICO":          "PLAST.",
+    "PLASTICO":          "PLAST.",
+    "CONTROLE":          "CONT.",
+    "REMOTO":            "REM.",
+    "VELOCIDADE":        "VEL.",
+    "MEDIDAS":           "MED.",        # só plural
 }
 
 # ─────────────────────────────────────────────
