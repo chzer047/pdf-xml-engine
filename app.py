@@ -56,26 +56,30 @@ ABREV_DREM_INDIVIDUAIS = {
 }
 
 # Modo 2: PDF>XML — Certificados Open
-# Regra: só aplica se nome > 200 chars — percorre na ordem abaixo
-ABREV_OPEN = {
-    "MECANISMO SIMPLES": "MEC.SIMPL.",  # composta — aplicada antes das individuais
-    "BASICAMENTE":       "BASIC.",
-    "PRODUZIDO":         "PROD.",
-    "INDICATIVO":        "IND.",
-    "RESTRITIVO":        "REST.",
-    "ANOS":              "A",           # \b garante que não casa com ex: 3ANOS
-    "MESES":             "MES.",
-    "INJEÇÃO":           "INJ.",
-    "INJECAO":           "INJ.",
-    "MÁXIMA":            "MAX.",
-    "MAXIMA":            "MAX.",
-    "PLÁSTICO":          "PLAST.",
-    "PLASTICO":          "PLAST.",
-    "CONTROLE":          "CONT.",
-    "REMOTO":            "REM.",
-    "VELOCIDADE":        "VEL.",
-    "MEDIDAS":           "MED.",        # só plural
-}
+# Lista de (padrão regex, abreviação) — aplicados em ordem
+ABREV_OPEN_REGRAS = [
+    (r'\bMECANISMO SIMPLES\b',  "MEC.SIMPL."),
+    (r'\bBASICAMENTE\b',         "BASIC."),
+    (r'\bDENOMINADO\b',          "DENOM."),
+    (r'\bUMEDECENDO\b',          "UMED."),
+    (r'\bINVISIVEIS\b',          "INVIS."),
+    (r'\bINVISIVEL\b',           "INVIS."),
+    (r'\bVARIADOS\b',            "VAR."),
+    (r'\bVISIVEL\b',             "VIS."),
+    (r'\bPRODUZIDO\b',           "PROD."),
+    (r'\bINDICATIVO\b',          "IND."),
+    (r'\bRESTRITIVO\b',          "REST."),
+    (r'\bRESTRI[ÇC][ÃA]O\b',    "REST."),   # RESTRIÇÃO e RESTRICAO
+    (r'(?<![A-Za-z])ANOS\b',     "A"),        # +3ANOS / -3ANOS / 3ANOS
+    (r'(?<![A-Za-z])MESES\b',    "MES."),
+    (r'\bINJE[ÇC][ÃA]O\b',      "INJ."),    # INJEÇÃO e INJECAO
+    (r'\bM[ÁA]XIMA\b',          "MAX."),    # MÁXIMA e MAXIMA
+    (r'\bPL[ÁA]STICO\b',        "PLAST."),  # PLÁSTICO e PLASTICO
+    (r'\bCONTROLE\b',            "CONT."),
+    (r'\bREMOTO\b',              "REM."),
+    (r'\bVELOCIDADE\b',          "VEL."),
+    (r'\bMEDIDAS?\b',            "MED."),    # MEDIDA e MEDIDAS
+]
 
 # ─────────────────────────────────────────────
 # FUNÇÕES DE ABREVIAÇÃO
@@ -99,8 +103,8 @@ def aplicar_abreviacoes_open(nome):
     resultado = normalizar_para_iso(nome).upper()
     if len(resultado) <= 200:
         return resultado
-    for palavra, abrev in ABREV_OPEN.items():
-        resultado = re.sub(r'\b' + re.escape(palavra) + r'\b', abrev, resultado)
+    for padrao, abrev in ABREV_OPEN_REGRAS:
+        resultado = re.sub(padrao, abrev, resultado)
     if len(resultado) > 200:
         resultado = resultado[:200].rstrip(", ;")
     return resultado
