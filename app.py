@@ -81,6 +81,75 @@ ABREV_OPEN_REGRAS = [
     (r'\bMEDIDAS?\b',            "MED."),    # MEDIDA e MEDIDAS
 ]
 
+# Modo 3: Escolar — Certificados Escolares
+# Fase 1 — expressões compostas (aplicadas primeiro, na ordem exata)
+ABREV_ESCOLAR_COMPOSTOS = [
+    ("MINI CANETINHA HIDROCOR",  "MINI CAN.HIDR."),
+    ("CANETINHAS HIDROCOR",      "CAN.HIDR."),
+    ("CANETINHA HIDROCOR",       "CAN.HIDR."),
+    ("LÁPIS DE COR",             "LAP.COR."),
+    ("LAPIS DE COR",             "LAP.COR."),
+    ("BASTÕES DE PASTEL",        "BAST.PAST."),
+    ("BASTOES DE PASTEL",        "BAST.PAST."),
+    ("MALETA COLORIDA",          "MAL.COLOR."),
+    ("USO ESCOLAR",              "USO ESC."),
+    ("TINTA GUACHE",             "T.GUACHE."),
+    ("PINCÉIS AQUARELÁVEL",      "PINC.AQUAR."),
+    ("PINCEIS AQUARELAVEL",      "PINC.AQUAR."),
+]
+
+# Fase 2 — palavras individuais (só se ainda > 200 após fase 1)
+ABREV_ESCOLAR_INDIVIDUAIS = {
+    "CANETINHAS":   "CANETIN.",
+    "CANETINHA":    "CANETIN.",
+    "CANETAS":      "CAN.",
+    "CANETA":       "CAN.",
+    "HIDROCOR":     "HIDR.",
+    "BORRACHAS":    "BORR.",
+    "BORRACHA":     "BORR.",
+    "AQUARELAS":    "AQUAR.",
+    "AQUARELA":     "AQUAR.",
+    "AQUARELÁVEL":  "AQUAREL.",
+    "AQUARELAVEL":  "AQUAREL.",
+    "BASTÕES":      "BAST.",
+    "BASTOES":      "BAST.",
+    "BASTÃO":       "BAST.",
+    "BASTAO":       "BAST.",
+    "PASTEL":       "PAST.",
+    "RÉGUAS":       "REG.",
+    "RÉGUA":        "REG.",
+    "REGUAS":       "REG.",
+    "REGUA":        "REG.",
+    "APONTADORES":  "APON.",
+    "APONTADOR":    "APON.",
+    "MALETA":       "MAL.",
+    "COLORIDAS":    "COLOR.",
+    "COLORIDOS":    "COLOR.",
+    "COLORIDA":     "COLOR.",
+    "COLORIDO":     "COLOR.",
+    "ESCOLAR":      "ESC.",
+    "TAMANHO":      "TAM.",
+    "QUADRADA":     "QUAD.",
+    "QUADRADO":     "QUAD.",
+    "CONTENDO":     "CONT.",
+    "LÁPIS":        "LAP.",
+    "LAPIS":        "LAP.",
+    "PINCÉIS":      "PINC.",
+    "PINCEIS":      "PINC.",
+    "PINCEL":       "PINC.",
+    "TESOURA":      "TESOUR.",
+    "CADERNOS":     "CAD.",
+    "CADERNO":      "CAD.",
+    "FICHÁRIOS":    "FICH.",
+    "FICHARIO":     "FICH.",
+    "FICHÁRIO":     "FICH.",
+    "CONJUNTO":     "CONJ.",
+    "CONJUNTOS":    "CONJ.",
+    "ESTOJO":       "ESTJ.",
+    "ESTOJOS":      "ESTJ.",
+    "COLORIR":      "COLOR.",
+}
+
 # ─────────────────────────────────────────────
 # FUNÇÕES DE ABREVIAÇÃO
 # ─────────────────────────────────────────────
@@ -105,6 +174,20 @@ def aplicar_abreviacoes_open(nome):
         return resultado
     for padrao, abrev in ABREV_OPEN_REGRAS:
         resultado = re.sub(padrao, abrev, resultado)
+    if len(resultado) > 200:
+        resultado = resultado[:200].rstrip(", ;")
+    return resultado
+
+
+def aplicar_abreviacoes_escolar(nome):
+    resultado = normalizar_para_iso(nome).upper()
+    if len(resultado) <= 200:
+        return resultado
+    for original, abrev in ABREV_ESCOLAR_COMPOSTOS:
+        resultado = re.sub(re.escape(original), abrev, resultado)
+    if len(resultado) > 200:
+        for palavra, abrev in ABREV_ESCOLAR_INDIVIDUAIS.items():
+            resultado = re.sub(r'\b' + re.escape(palavra) + r'\b', abrev, resultado)
     if len(resultado) > 200:
         resultado = resultado[:200].rstrip(", ;")
     return resultado
@@ -330,7 +413,8 @@ modo = st.radio(
     "**Selecione o modo:**",
     [
         "⚡ XML Rápido — Certificados Drem",
-        "📄 PDF → XML — Certificados Open"
+        "📄 PDF → XML — Certificados Open",
+        "🎒 PDF → XML — Certificados Escolar",
     ],
     horizontal=True
 )
@@ -435,7 +519,7 @@ if "XML Rápido" in modo:
 
 # ─── MODO 2: PDF → XML (OPEN) ────────────────────────────────────────────────
 
-else:
+elif "Open" in modo:
     st.subheader("📄 PDF → XML — Certificados Open")
     st.caption("Envie o PDF e o sistema extrairá e converterá os dados automaticamente.")
 
@@ -495,6 +579,72 @@ else:
         st.info("Aguardando o envio do PDF.")
 
 
+# ─── MODO 3: PDF → XML (ESCOLAR) ─────────────────────────────────────────────
+
+else:
+    st.subheader("🎒 PDF → XML — Certificados Escolar")
+    st.caption("Envie o PDF e o sistema extrairá e converterá os dados com o dicionário Escolar.")
+
+    uploaded_file = st.file_uploader(
+        "Envie o PDF do certificado",
+        type="pdf",
+        key="uploader_escolar"
+    )
+
+    if uploaded_file:
+        nome_base = Path(uploaded_file.name).stem
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pdf_path = Path(tmpdir) / uploaded_file.name
+            pdf_path.write_bytes(uploaded_file.read())
+
+            with st.spinner("Lendo e processando o PDF..."):
+                header = extrair_header_open(pdf_path)
+                rows   = parse_pdf_open(pdf_path)
+
+        if not rows:
+            st.error("Nenhum item válido encontrado no PDF. Verifique se o formato está correto.")
+            st.stop()
+
+        col_a, col_b, col_c, col_d = st.columns(4)
+        col_a.metric("IP-BRI", header['ip_bri'] or "—")
+        col_b.metric("CE-BRI", header['ce_bri'] or "—")
+        col_c.metric("Data",   header['data']   or "—")
+        col_d.metric("REV",    header['rev']    or "—")
+
+        codigos = [r['codigo'] for r in rows]
+        duplicados = sorted(set(c for c in codigos if codigos.count(c) > 1))
+        if duplicados:
+            st.warning(f"Códigos duplicados detectados: {', '.join(duplicados)}")
+
+        nomes_longos = sum(1 for r in rows if len(r['nome']) > 200)
+        if nomes_longos:
+            st.info(f"{nomes_longos} descrição(ões) com > 200 chars — abreviações Escolar serão aplicadas.")
+
+        df = pd.DataFrame(rows)
+        df_exibir = df[['ordem', 'marca', 'modelo', 'nome', 'codigo']].copy()
+        df_exibir.columns = ['Ordem', 'Marca', 'Modelo', 'Nome', 'Código']
+
+        st.success(f"{len(rows)} item(s) encontrado(s) ✅")
+        st.dataframe(df_exibir, use_container_width=True)
+
+        xml_virgula = gerar_xml(rows, ",", aplicar_abreviacoes_escolar)
+        xml_ponto   = gerar_xml(rows, ".", aplicar_abreviacoes_escolar)
+        xml_sem     = gerar_xml(rows, "",  aplicar_abreviacoes_escolar)
+        zip_buf     = criar_zip_tres(xml_virgula, xml_ponto, xml_sem, nome_base)
+
+        st.download_button(
+            "📥 Baixar XMLs (ZIP)",
+            zip_buf,
+            f"{nome_base}_xmls.zip",
+            mime="application/zip",
+            use_container_width=True
+        )
+
+    else:
+        st.info("Aguardando o envio do PDF.")
+
+
 # ─── ABREVIADOR DE DESCRIÇÕES ────────────────────────────────────────────────
 
 st.markdown("---")
@@ -506,7 +656,7 @@ col_input, col_config = st.columns([3, 1])
 with col_config:
     dicionario_escolhido = st.selectbox(
         "Dicionário",
-        ["⚡ Drem (INNAC)", "📄 Open"],
+        ["⚡ Drem (INNAC)", "📄 Open", "🎒 Escolar"],
         key="abrev_dict"
     )
 
@@ -523,9 +673,12 @@ if st.button("✂️ Abreviar", type="primary", key="btn_abreviar"):
         if "Drem" in dicionario_escolhido:
             resultado  = aplicar_abreviacoes_drem(descricao_input.strip())
             dict_label = "Drem (INNAC)"
-        else:
+        elif "Open" in dicionario_escolhido:
             resultado  = aplicar_abreviacoes_open(descricao_input.strip())
             dict_label = "Open"
+        else:
+            resultado  = aplicar_abreviacoes_escolar(descricao_input.strip())
+            dict_label = "Escolar"
 
         original_len  = len(descricao_input.strip())
         resultado_len = len(resultado)
